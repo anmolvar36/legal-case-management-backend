@@ -13,32 +13,27 @@ dotenv.config();
 const app = express();
 
 // Middleware
-const clientOrigin = (process.env.CLIENT_URL || 'http://localhost:5173').trim();
-const allowedOrigins = [
-  clientOrigin,
-  'http://localhost:5173',
-  'https://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:3000',
-  'http://legal-case-manage.kiaansoftware.com',
-  'https://legal-case-manage.kiaansoftware.com'
-];
+const clientUrls = (process.env.CLIENT_URL || '')
+  .split(',')
+  .map(url => url.trim())
+  .filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps, curl, or same-origin)
     if (!origin) return callback(null, true);
     
-    const isAllowed = allowedOrigins.includes(origin) || 
-                      origin.endsWith('.railway.app') || 
-                      origin.endsWith('.kiaansoftware.com') ||
-                      process.env.NODE_ENV !== 'production'; // Allow all in dev for mobile testing
-    
-    if (isAllowed) {
+    const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+    const isAllowedDomain = origin.endsWith('.railway.app') || 
+                            origin.endsWith('.kiaansoftware.com');
+    const isClientUrl = clientUrls.includes(origin);
+    const isDev = process.env.NODE_ENV !== 'production';
+
+    if (isLocalhost || isAllowedDomain || isClientUrl || isDev) {
       callback(null, true);
     } else {
       console.warn(`CORS blocked for origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
+      callback(null, false);
     }
   },
   credentials: true
