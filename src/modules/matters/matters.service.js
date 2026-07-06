@@ -32,6 +32,7 @@ const getAll = async (query, user) => {
     take,
     include: {
       client: { select: { id: true, full_name: true } },
+      parties: { select: { id: true, full_name: true } },
       assigned_lawyer: { select: { id: true, full_name: true } },
     },
     orderBy: { created_at: 'desc' },
@@ -61,6 +62,7 @@ const getById = async (id, user) => {
     where: { id: parseInt(id) },
     include: {
       client: true,
+      parties: { select: { id: true, full_name: true } },
       assigned_lawyer: { select: { id: true, full_name: true, email: true } },
       created_by: { select: { id: true, full_name: true } },
       documents: {
@@ -157,7 +159,22 @@ const create = async (data, user) => {
     data.created_by_user_id = user.id;
   }
 
-  const { custom_fields, ...payload } = data;
+  const { custom_fields, clientIds, clientId, ...payload } = data;
+
+  let idsToConnect = [];
+  if (clientIds && Array.isArray(clientIds) && clientIds.length > 0) {
+    idsToConnect = clientIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  } else if (clientId) {
+    idsToConnect = [parseInt(clientId, 10)].filter(id => !isNaN(id));
+  }
+
+  if (idsToConnect.length > 0) {
+    payload.client_id = idsToConnect[0];
+    payload.parties = {
+      connect: idsToConnect.map(id => ({ id }))
+    };
+  }
+
   if (!payload.matter_number) {
     payload.matter_number = await nextMatterNumber();
   }
@@ -312,7 +329,23 @@ const remove = async (id, user) => {
     err.statusCode = 403;
     throw err;
   }
-  return await prisma.matter.delete({ where: { id: parseInt(id, 10) } });
+  const matterId = parseInt(id, 10);
+  await prisma.$transaction([
+    prisma.matterStatusHistory.deleteMany({ where: { matter_id: matterId } }),
+    prisma.document.deleteMany({ where: { matter_id: matterId } }),
+    prisma.communication.deleteMany({ where: { matter_id: matterId } }),
+    prisma.invoice.deleteMany({ where: { matter_id: matterId } }),
+    prisma.draft.deleteMany({ where: { matter_id: matterId } }),
+    prisma.activity.deleteMany({ where: { matter_id: matterId } }),
+    prisma.timeEntry.deleteMany({ where: { matter_id: matterId } }),
+    prisma.calendarEvent.deleteMany({ where: { matter_id: matterId } }),
+    prisma.folder.deleteMany({ where: { matter_id: matterId } }),
+    prisma.trustTransaction.deleteMany({ where: { matter_id: matterId } }),
+    prisma.task.deleteMany({ where: { matter_id: matterId } }),
+    prisma.matterCustomFieldValue.deleteMany({ where: { matter_id: matterId } }),
+    prisma.matter.delete({ where: { id: matterId } })
+  ]);
+  return { success: true };
 };
 
 

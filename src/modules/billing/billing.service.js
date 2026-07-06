@@ -48,6 +48,12 @@ async function buildInvoicePdfBuffer(invoice) {
               // A4 background
               doc.image(img, 0, 0, { width: doc.page.width, height: doc.page.height });
               letterheadDrawnAsBackground = true;
+              
+              // Draw a semi-transparent white overlay to ensure text is readable
+              doc.save();
+              doc.fillColor('white').opacity(0.85);
+              doc.rect(40, 30, doc.page.width - 80, doc.page.height - 60).fill();
+              doc.restore();
             } else {
               // Render as logo
               doc.image(img, 50, 20, { width: 80 });

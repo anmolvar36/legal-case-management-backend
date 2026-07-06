@@ -42,9 +42,11 @@ exports.getCompanyProfile = async () => {
  * Updates the centralized Company Profile.
  */
 exports.updateCompanyProfile = async (data) => {
+  console.log("updateCompanyProfile received data:", data);
+  const { id, created_at, updated_at, ...updateData } = data;
   return await prisma.companyProfile.upsert({
     where: { id: 1 },
-    update: data,
-    create: { id: 1, ...data }
+    update: updateData,
+    create: { id: 1, ...updateData }
   });
 };

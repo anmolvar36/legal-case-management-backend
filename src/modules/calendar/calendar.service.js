@@ -105,7 +105,7 @@ exports.createEvent = async (userId, body) => {
   });
 
   // Task generation for court-related events (Hearing, Trial, Filing Deadline)
-  if (isCourtRelated) {
+  if (isCourtRelated && body.create_task === true) {
     const tasksService = require('../tasks/tasks.service');
     // Fetch creator details
     const creatorUser = await prisma.user.findUnique({
@@ -208,7 +208,7 @@ exports.syncMatterDates = async (matter, userId) => {
           matter_id: matter.id,
           type: dateInfo.type,
           description: `Auto-synced from matter ${matter.matter_number}`,
-          create_task: true
+          create_task: false
         });
       }
     }

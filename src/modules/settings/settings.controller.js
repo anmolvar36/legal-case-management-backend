@@ -58,3 +58,21 @@ exports.uploadLetterhead = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.removeLogo = async (req, res, next) => {
+  try {
+    const profile = await settingsService.updateCompanyProfile({ logo_url: null });
+    res.json(sendResponse(true, 'Logo removed', profile));
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.removeLetterhead = async (req, res, next) => {
+  try {
+    const profile = await settingsService.updateCompanyProfile({ letterhead_url: null });
+    res.json(sendResponse(true, 'Letterhead removed', profile));
+  } catch (err) {
+    next(err);
+  }
+};

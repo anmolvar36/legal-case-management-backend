@@ -185,6 +185,8 @@ const generatePdf = (draftId, user) => {
       let logoDrawn = false;
       let letterheadDrawnAsBackground = false;
 
+      let logoFromLetterhead = null;
+
       if (company.letterhead_url) {
         try {
           const letterheadPath = path.join(process.cwd(), company.letterhead_url);
@@ -201,12 +203,10 @@ const generatePdf = (draftId, user) => {
               // A4 or full page size (A4 is approx 0.77)
               doc.image(img, 0, 0, { width: doc.page.width, height: doc.page.height });
               letterheadDrawnAsBackground = true;
-              doc.y = 120;
+              doc.y = 180;
             } else {
               // Square, QR code, or normal logo uploaded as letterhead
-              doc.image(img, 50, 40, { width: 80 });
-              logoDrawn = true;
-              doc.y = 120;
+              logoFromLetterhead = img;
             }
           }
         } catch (e) {
@@ -214,15 +214,54 @@ const generatePdf = (draftId, user) => {
         }
       } 
       
-      if (company.logo_url && !logoDrawn) {
+      // Generate default burgundy template if no letterhead is uploaded
+      if (!letterheadDrawnAsBackground) {
+        doc.save();
+        
+        // Top Burgundy Curve
+        doc.fillColor('#7d132a');
+        doc.moveTo(0, 0)
+           .lineTo(doc.page.width, 0)
+           .lineTo(doc.page.width, 160)
+           .quadraticCurveTo(doc.page.width / 2, 90, 0, 110)
+           .fill();
+        
+        // Top Red Accent
+        doc.fillColor('#d41639');
+        doc.moveTo(0, 100)
+           .quadraticCurveTo(doc.page.width / 2, 80, doc.page.width, 150)
+           .lineTo(doc.page.width, 170)
+           .quadraticCurveTo(doc.page.width / 2, 100, 0, 120)
+           .fill();
+
+        // Bottom Burgundy Curve
+        doc.fillColor('#7d132a');
+        doc.moveTo(0, doc.page.height)
+           .lineTo(250, doc.page.height)
+           .lineTo(0, doc.page.height - 150)
+           .fill();
+        
+        // Bottom Red Accent
+        doc.fillColor('#d41639');
+        doc.moveTo(0, doc.page.height - 160)
+           .lineTo(270, doc.page.height)
+           .lineTo(240, doc.page.height)
+           .lineTo(0, doc.page.height - 140)
+           .fill();
+
+        doc.restore();
+      }
+
+      // Draw Logo
+      if (logoFromLetterhead) {
+        doc.image(logoFromLetterhead, 50, 30, { width: 80 });
+        logoDrawn = true;
+      } else if (company.logo_url && !logoDrawn) {
         try {
           const logoPath = path.join(process.cwd(), company.logo_url);
           if (fs.existsSync(logoPath)) {
-            doc.image(logoPath, 50, 40, { width: 80 });
+            doc.image(logoPath, 50, 30, { width: 80 });
             logoDrawn = true;
-            if (doc.y < 120 && !letterheadDrawnAsBackground) {
-              doc.y = 120;
-            }
           }
         } catch (e) {
           console.warn('Could not load logo', e);
@@ -230,35 +269,43 @@ const generatePdf = (draftId, user) => {
       }
 
       // Firm Contact Info
-      if (company.company_name) {
-        if (logoDrawn || letterheadDrawnAsBackground) {
-          // If logo or banner is drawn, print info on the right
-          doc.fontSize(10).fillColor('#666666');
-          doc.text(company.company_name, { align: 'right' });
-          if (company.address) doc.text(company.address, { align: 'right' });
-          if (company.phone) doc.text(`Phone: ${company.phone}`, { align: 'right' });
-          if (company.email) doc.text(`Email: ${company.email}`, { align: 'right' });
-          if (company.website) doc.text(company.website, { align: 'right' });
-          doc.moveDown(2);
-        } else {
-          // No imagery, print at top center
-          doc.fontSize(14).fillColor('#333333').text(company.company_name, { align: 'center' });
-          doc.fontSize(10).fillColor('#666666');
-          if (company.address) doc.text(company.address, { align: 'center' });
-          if (company.phone) doc.text(`Phone: ${company.phone} | Email: ${company.email}`, { align: 'center' });
-          doc.moveDown(2);
-        }
-      } else {
-         doc.moveDown(2);
+      if (company.company_name || true) {
+        // Top Left: Company Name
+        const companyX = logoDrawn ? 140 : 50;
+        doc.fontSize(24).fillColor('#ffffff').text(company.company_name || 'COMPANY NAME', companyX, 35);
+        doc.fontSize(10).fillColor('#ffffff').text(company.website || 'PLACE YOUR TEXT HERE', companyX, 65);
+
+        // Top Right: Contact Info
+        doc.fontSize(10).fillColor('#ffffff');
+        const contactX = doc.page.width - 220;
+        doc.text(`Phone: ${company.phone || '111-456-9870'}`, contactX, 30);
+        doc.text(`Email: ${company.email || 'email@example.com'}`, contactX, 50);
+        doc.text(`Location: ${company.address || 'city, state, zip'}`, contactX, 70);
       }
 
+      // Reset coordinates for the main content to flow properly
+      doc.x = 50;
+      doc.y = 190;
+
       doc.fillColor('#000000');
-      doc.fontSize(20).text(draft.title, { align: 'center' });
+      doc.fontSize(20).text(draft.title, { align: 'left', width: doc.page.width - 100 });
       doc.moveDown();
+      
       doc.fontSize(12).text(`Matter ID: ${draft.matter_id}`);
       doc.text(`Created By: ${draft.created_by?.full_name || 'System'}`);
-      doc.moveDown();
+      doc.moveDown(2);
+      
+      // Content
       doc.fontSize(11).text(draft.content || 'No content provided.');
+
+      // Signature area
+      doc.moveDown(6);
+      const currentY = doc.y;
+      doc.moveTo(50, currentY).lineTo(250, currentY).strokeColor('#000000').lineWidth(1).stroke();
+      doc.y = currentY + 10;
+      doc.fontSize(11).fillColor('#000000').text('Authorized Signature', 50, doc.y);
+      doc.fontSize(10).fillColor('#666666').text(draft.created_by?.full_name || 'System Administrator', 50, doc.y + 15);
+
       doc.end();
     } catch (err) {
       reject(err);

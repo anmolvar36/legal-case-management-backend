@@ -180,6 +180,7 @@ model Client {
   matters           Matter[]
   trust_account     TrustAccount?
   trust_transactions TrustTransaction[]
+  matter_parties    Matter[] @relation("MatterParties")
 
   @@map("clients")
 }
@@ -213,6 +214,7 @@ model Matter {
   client               Client       @relation(fields: [client_id], references: [id])
   assigned_lawyer      User?        @relation("AssignedLawyer", fields: [assigned_lawyer_id], references: [id])
   created_by           User         @relation("CreatedBy", fields: [created_by_user_id], references: [id])
+  parties              Client[]     @relation("MatterParties")
   
   documents            Document[]
   communications       Communication[]

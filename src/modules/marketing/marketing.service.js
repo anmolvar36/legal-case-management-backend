@@ -82,7 +82,12 @@ const remove = async (id) => {
 };
 
 const getSocialLinks = async () => {
-  return await prisma.socialLink.findMany();
+  try {
+    return await prisma.socialLink.findMany();
+  } catch (err) {
+    console.error('getSocialLinks error:', err.message);
+    return [];
+  }
 };
 
 const updateSocialLinks = async (links) => {
@@ -97,14 +102,19 @@ const updateSocialLinks = async (links) => {
     }
   }
 
-  const operations = links.map(link => 
-    prisma.socialLink.upsert({
-      where: { platform: link.platform },
-      update: { url: link.url },
-      create: { platform: link.platform, url: link.url }
-    })
-  );
-  return await prisma.$transaction(operations);
+  try {
+    const operations = links.map(link => 
+      prisma.socialLink.upsert({
+        where: { platform: link.platform },
+        update: { url: link.url },
+        create: { platform: link.platform, url: link.url }
+      })
+    );
+    return await prisma.$transaction(operations);
+  } catch (err) {
+    console.error('updateSocialLinks error:', err.message);
+    return [];
+  }
 };
 
 module.exports = {
