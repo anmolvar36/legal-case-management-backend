@@ -5,7 +5,9 @@ const canAccessMatter = (matter, user) => {
   if (!matter || !user) return false;
   if (user.role === 'admin') return true;
   if (user.role === 'lawyer') return matter.assigned_lawyer_id === user.id;
-  if (user.role === 'client') return matter.client?.user_id === user.id;
+  if (user.role === 'client') {
+    return matter.client?.user_id === user.id || (matter.parties && matter.parties.some(p => p.user_id === user.id));
+  }
   return false;
 };
 
@@ -24,7 +26,12 @@ const getAll = async (query, user) => {
   if (client_id) where.client_id = parseInt(client_id);
   if (lawyer_id) where.assigned_lawyer_id = parseInt(lawyer_id);
   if (user?.role === 'lawyer') where.assigned_lawyer_id = user.id;
-  if (user?.role === 'client') where.client = { user_id: user.id };
+  if (user?.role === 'client') {
+    where.OR = [
+      { client: { user_id: user.id } },
+      { parties: { some: { user_id: user.id } } }
+    ];
+  }
 
   const matters = await prisma.matter.findMany({
     where,
@@ -62,7 +69,7 @@ const getById = async (id, user) => {
     where: { id: parseInt(id) },
     include: {
       client: true,
-      parties: { select: { id: true, full_name: true } },
+      parties: { select: { id: true, full_name: true, user_id: true } },
       assigned_lawyer: { select: { id: true, full_name: true, email: true } },
       created_by: { select: { id: true, full_name: true } },
       documents: {

@@ -6,7 +6,15 @@ const path = require('path');
 const documentScope = (user) => {
   if (!user || user.role === 'admin') return {};
   if (user.role === 'lawyer') return { matter: { assigned_lawyer_id: user.id } };
-  return { matter: { client: { user_id: user.id } }, visibility: { in: ['client_shared', 'client_visible'] } };
+  return {
+    matter: {
+      OR: [
+        { client: { user_id: user.id } },
+        { parties: { some: { user_id: user.id } } }
+      ]
+    },
+    visibility: { in: ['client_shared', 'client_visible'] }
+  };
 };
 
 const ensureDocumentAccess = async (doc, user) => {
@@ -18,7 +26,13 @@ const ensureDocumentAccess = async (doc, user) => {
   }
   if (user.role === 'client') {
     const ok = await prisma.matter.count({
-      where: { id: doc.matter_id, client: { user_id: user.id } },
+      where: {
+        id: doc.matter_id,
+        OR: [
+          { client: { user_id: user.id } },
+          { parties: { some: { user_id: user.id } } }
+        ]
+      },
     });
     return ok > 0 && (doc.visibility === 'client_shared' || doc.visibility === 'client_visible');
   }
@@ -84,7 +98,13 @@ const create = async (data, user) => {
   }
   if (user?.role === 'client') {
     const allowed = await prisma.matter.count({
-      where: { id: payload.matter_id, client: { user_id: user.id } },
+      where: {
+        id: payload.matter_id,
+        OR: [
+          { client: { user_id: user.id } },
+          { parties: { some: { user_id: user.id } } }
+        ]
+      },
     });
     if (!allowed) {
       const err = new Error('Not authorized to upload document to this matter');
@@ -139,25 +159,44 @@ const create = async (data, user) => {
 
   // Create real-time notification
   const matterDetail = await prisma.matter.findUnique({
-    where: { id: document.matter_id },
-    include: { client: { select: { user_id: true } } }
+    where: { id: document.matter_id }
   });
 
-  let targetUserId = null;
   if (user?.role === 'client') {
-    targetUserId = matterDetail.assigned_lawyer_id;
+    const targetUserId = matterDetail.assigned_lawyer_id;
+    if (targetUserId) {
+      await notificationsService.createNotification({
+        user_id: targetUserId,
+        title: 'New Document Uploaded',
+        message: `A new document "${document.original_name}" has been added to matter ${matterDetail.matter_number}.`,
+        type: 'document',
+        reference_id: document.matter_id
+      });
+    }
   } else {
-    targetUserId = matterDetail.client?.user_id;
-  }
-
-  if (targetUserId) {
-    await notificationsService.createNotification({
-      user_id: targetUserId,
-      title: 'New Document Uploaded',
-      message: `A new document "${document.original_name}" has been added to matter ${matterDetail.matter_number}.`,
-      type: 'document',
-      reference_id: document.matter_id
+    // Notify all clients linked to the matter
+    const clientsToNotify = await prisma.client.findMany({
+      where: {
+        OR: [
+          { id: matterDetail.client_id },
+          { matter_parties: { some: { id: document.matter_id } } }
+        ],
+        user_id: { not: null }
+      },
+      select: { user_id: true }
     });
+
+    for (const c of clientsToNotify) {
+      if (c.user_id && c.user_id !== user.id) {
+        await notificationsService.createNotification({
+          user_id: c.user_id,
+          title: 'New Document Uploaded',
+          message: `A new document "${document.original_name}" has been added to matter ${matterDetail.matter_number}.`,
+          type: 'document',
+          reference_id: document.matter_id
+        });
+      }
+    }
   }
 
   return document;

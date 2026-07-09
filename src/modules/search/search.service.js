@@ -20,7 +20,12 @@ const searchAll = async (q, user) => {
     ]
   };
   if (user.role === 'lawyer') matterWhere.assigned_lawyer_id = user.id;
-  if (user.role === 'client') matterWhere.client = { user_id: user.id };
+  if (user.role === 'client') {
+    matterWhere.OR = [
+      { client: { user_id: user.id } },
+      { parties: { some: { user_id: user.id } } }
+    ];
+  }
 
   const matters = await prisma.matter.findMany({
     where: matterWhere,
@@ -89,7 +94,12 @@ const searchAll = async (q, user) => {
   };
   if (user.role === 'lawyer') docWhere.matter = { assigned_lawyer_id: user.id };
   if (user.role === 'client') {
-    docWhere.matter = { client: { user_id: user.id } };
+    docWhere.matter = {
+      OR: [
+        { client: { user_id: user.id } },
+        { parties: { some: { user_id: user.id } } }
+      ]
+    };
     docWhere.visibility = { in: ['client_shared', 'client_visible'] };
   }
 

@@ -7,6 +7,7 @@ const getAll = async (query, user) => {
 
   const where = {};
   if (category) where.category = category;
+  if (user?.role !== 'admin') where.is_active = true;
 
   return await prisma.template.findMany({
     where,
@@ -130,11 +131,39 @@ const cloneToMatter = async (templateId, matterId, user) => {
   });
 };
 
+const duplicate = async (id, user) => {
+  if (user?.role === 'client') {
+    const err = new Error('Client cannot duplicate templates');
+    err.statusCode = 403;
+    throw err;
+  }
+  const original = await getById(id, user);
+  if (!original) {
+    const err = new Error('Template not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  return await prisma.template.create({
+    data: {
+      title: `${original.title} (Copy)`,
+      content: original.content,
+      category: original.category,
+      practice_area: original.practice_area,
+      matter_type: original.matter_type,
+      description: original.description,
+      is_active: original.is_active,
+      created_by_user_id: user.id
+    }
+  });
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
   remove,
-  cloneToMatter
+  cloneToMatter,
+  duplicate
 };

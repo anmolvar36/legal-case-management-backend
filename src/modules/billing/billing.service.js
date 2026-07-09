@@ -104,6 +104,9 @@ async function buildInvoicePdfBuffer(invoice) {
 
       doc.moveDown(5);
 
+      // --- Separator between header and billing info ---
+      doc.save().lineWidth(1).strokeColor(borderGray).moveTo(50, 125).lineTo(562, 125).stroke().restore();
+
       // --- Invoice Info Grid ---
       const metaY = 140;
       
@@ -129,36 +132,64 @@ async function buildInvoicePdfBuffer(invoice) {
 
       doc.moveDown(6);
 
+      // --- Separator before matter ---
+      const sepBefore = doc.y + 5;
+      doc.save().lineWidth(0.75).strokeColor(borderGray).moveTo(50, sepBefore).lineTo(562, sepBefore).stroke().restore();
+
       // --- Matter Context ---
-      const matterY = doc.y + 10;
+      const matterY = sepBefore + 10;
       doc.roundedRect(50, matterY, 512, 35, 4).fill(lightGray);
-      doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text(`Matter: ${invoice.matter?.matter_number || ''} — ${invoice.matter?.title || 'General Legal Services'}`, 65, matterY + 12);
+      doc.save().lineWidth(0.75).strokeColor(borderGray).roundedRect(50, matterY, 512, 35, 4).stroke().restore();
+      doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text(`Matter: ${invoice.matter?.matter_number || ''} \u2014 ${invoice.matter?.title || 'General Legal Services'}`, 65, matterY + 12);
 
       doc.moveDown(4);
 
+      // --- Separator line before table ---
+      const sepBeforeTable = doc.y + 5;
+      doc.save().lineWidth(0.75).strokeColor(borderGray).moveTo(50, sepBeforeTable).lineTo(562, sepBeforeTable).stroke().restore();
+      doc.y = sepBeforeTable + 10;
+
       // --- Table Header ---
       const tableTop = doc.y;
-      doc.rect(50, tableTop, 512, 25).fill(primaryColor);
-      doc.fillColor('#FFFFFF').fontSize(9).font('Helvetica-Bold').text('DESCRIPTION OF SERVICES', 65, tableTop + 8);
-      doc.text('AMOUNT', 480, tableTop + 8, { width: 70, align: 'right' });
+      doc.rect(50, tableTop, 512, 28).fill(primaryColor);
+      // Left & right vertical borders on header
+      doc.save().lineWidth(0.5).strokeColor(primaryColor);
+      doc.moveTo(50, tableTop).lineTo(50, tableTop + 28).stroke();
+      doc.moveTo(562, tableTop).lineTo(562, tableTop + 28).stroke();
+      doc.restore();
+      doc.fillColor('#FFFFFF').fontSize(9).font('Helvetica-Bold').text('DESCRIPTION OF SERVICES', 65, tableTop + 9);
+      doc.text('AMOUNT', 460, tableTop + 9, { width: 90, align: 'right' });
 
       // --- Table Rows ---
-      let rowY = tableTop + 25;
-      const items = (invoice.items && invoice.items.length > 0) 
-        ? invoice.items 
+      let rowY = tableTop + 28;
+      const items = (invoice.items && invoice.items.length > 0)
+        ? invoice.items
         : [{ description: invoice.description || 'Legal Advisory Services', amount: invoice.amount }];
 
+      const rowHeight = 30;
       items.forEach((item, i) => {
-        // Background for alternate rows
-        if (i % 2 === 1) {
-          doc.rect(50, rowY, 512, 25).fill('#F8FAFC');
+        // Alternate row background
+        if (i % 2 === 0) {
+          doc.rect(50, rowY, 512, rowHeight).fill('#FFFFFF');
+        } else {
+          doc.rect(50, rowY, 512, rowHeight).fill(lightGray);
         }
-        
-        doc.fillColor('#1E293B').font('Helvetica').fontSize(9).text(item.description, 65, rowY + 8, { width: 380 });
-        doc.fillColor('#000000').font('Helvetica-Bold').text(`₹${Number(item.amount).toLocaleString()}`, 480, rowY + 8, { width: 70, align: 'right' });
-        
-        rowY += 25;
-        
+
+        // Row borders: top line
+        doc.save().lineWidth(0.5).strokeColor(borderGray);
+        doc.moveTo(50, rowY).lineTo(562, rowY).stroke();
+        // Left border
+        doc.moveTo(50, rowY).lineTo(50, rowY + rowHeight).stroke();
+        // Right border
+        doc.moveTo(562, rowY).lineTo(562, rowY + rowHeight).stroke();
+        doc.restore();
+
+        doc.fillColor('#1E293B').font('Helvetica').fontSize(9).text(item.description, 65, rowY + 10, { width: 380 });
+        const amt = Number(item.amount || 0);
+        doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9).text('$' + amt.toFixed(2), 460, rowY + 10, { width: 90, align: 'right' });
+
+        rowY += rowHeight;
+
         // Page break check
         if (rowY > 700) {
           doc.addPage();
@@ -166,38 +197,55 @@ async function buildInvoicePdfBuffer(invoice) {
         }
       });
 
+      // Bottom border of last row
+      doc.save().lineWidth(0.75).strokeColor(borderGray).moveTo(50, rowY).lineTo(562, rowY).stroke().restore();
+
       // --- Summary Section ---
-      const summaryY = rowY + 20;
+      const summaryY = rowY + 25;
       const summaryX = 350;
-      
+
       const drawSummaryRow = (label, value, y, isTotal = false) => {
         doc.fillColor(isTotal ? primaryColor : textGray).fontSize(isTotal ? 12 : 10).font(isTotal ? 'Helvetica-Bold' : 'Helvetica').text(label, summaryX, y);
-        doc.fillColor(isTotal ? primaryColor : '#000000').fontSize(isTotal ? 16 : 10).font('Helvetica-Bold').text(value, summaryX + 80, y - (isTotal ? 4 : 0), { align: 'right', width: 130 });
+        doc.fillColor(isTotal ? primaryColor : '#000000').fontSize(isTotal ? 14 : 10).font('Helvetica-Bold').text(value, summaryX + 80, y - (isTotal ? 2 : 0), { align: 'right', width: 130 });
       };
 
       let currentSumY = summaryY;
-      drawSummaryRow('Subtotal:', `₹${Number(invoice.amount).toLocaleString()}`, currentSumY);
-      
-      currentSumY += 20;
-      drawSummaryRow('Tax (0.0%):', `₹0`, currentSumY);
+      const subtotal = Number(invoice.amount || 0);
+      drawSummaryRow('Subtotal:', '$' + subtotal.toFixed(2), currentSumY);
+
+      // Separator after subtotal
+      currentSumY += 18;
+      doc.save().lineWidth(0.3).strokeColor(borderGray).moveTo(summaryX, currentSumY).lineTo(562, currentSumY).stroke().restore();
+      currentSumY += 8;
+
+      drawSummaryRow('Tax (0.0%):', '$0.00', currentSumY);
 
       const paidAmount = (invoice.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
       if (paidAmount > 0) {
-        currentSumY += 20;
-        drawSummaryRow('Amount Paid:', `₹${paidAmount.toLocaleString()}`, currentSumY);
+        currentSumY += 18;
+        doc.save().lineWidth(0.3).strokeColor(borderGray).moveTo(summaryX, currentSumY).lineTo(562, currentSumY).stroke().restore();
+        currentSumY += 8;
+        drawSummaryRow('Amount Paid:', '-$' + paidAmount.toFixed(2), currentSumY);
       }
 
-      currentSumY += 30;
-      doc.rect(summaryX, currentSumY - 10, 212, 1).fill(borderGray);
-      
-      const dueAmount = Math.max(0, Number(invoice.amount) - paidAmount);
-      drawSummaryRow('TOTAL DUE', `₹${dueAmount.toLocaleString()}`, currentSumY, true);
+      // Heavy separator before TOTAL DUE
+      currentSumY += 22;
+      doc.save().lineWidth(1.5).strokeColor(primaryColor).moveTo(summaryX, currentSumY).lineTo(562, currentSumY).stroke().restore();
+      currentSumY += 10;
+
+      const dueAmount = Math.max(0, subtotal - paidAmount);
+      drawSummaryRow('TOTAL DUE', '$' + dueAmount.toFixed(2), currentSumY, true);
+
+      // Double line under TOTAL DUE
+      currentSumY += 22;
+      doc.save().lineWidth(1.0).strokeColor(primaryColor).moveTo(summaryX, currentSumY).lineTo(562, currentSumY).stroke().restore();
+      doc.save().lineWidth(0.5).strokeColor(primaryColor).moveTo(summaryX, currentSumY + 3).lineTo(562, currentSumY + 3).stroke().restore();
 
       // --- Footer ---
-      const footerTop = 750;
-      doc.rect(50, footerTop, 512, 0.5).fill(borderGray);
-      doc.fillColor(textGray).fontSize(8).font('Helvetica').text(`Legal Services rendered by ${company.company_name || 'Victoria Tulsidas Law'}. All amounts are in INR.`, 50, footerTop + 12, { align: 'center' });
-      doc.text('This is a computer generated document. Securely managed via VkTori Portal.', { align: 'center' });
+      const footerTop = Math.max(currentSumY + 40, 730);
+      doc.save().lineWidth(0.75).strokeColor(borderGray).moveTo(50, footerTop).lineTo(562, footerTop).stroke().restore();
+      doc.fillColor(textGray).fontSize(8).font('Helvetica').text('Legal Services rendered by ' + (company.company_name || 'Victoria Tulsidas Law') + '. All amounts are in USD.', 50, footerTop + 12, { align: 'center', width: 512 });
+      doc.text('This is a computer generated document. Securely managed via VkTori Portal.', 50, doc.y + 2, { align: 'center', width: 512 });
 
       doc.end();
     } catch (err) {
@@ -214,7 +262,15 @@ const ensureInvoiceAccess = async (invoice, user) => {
     return ok > 0;
   }
   if (user.role === 'client') {
-    const ok = await prisma.matter.count({ where: { id: invoice.matter_id, client: { user_id: user.id } } });
+    const ok = await prisma.matter.count({
+      where: {
+        id: invoice.matter_id,
+        OR: [
+          { client: { user_id: user.id } },
+          { parties: { some: { user_id: user.id } } }
+        ]
+      }
+    });
     return ok > 0;
   }
   return false;
@@ -258,7 +314,14 @@ const getAll = async (query, user) => {
   if (matter_id) where.matter_id = parseInt(matter_id);
   if (status) where.status = status;
   if (user?.role === 'lawyer') where.matter = { assigned_lawyer_id: user.id };
-  if (user?.role === 'client') where.matter = { client: { user_id: user.id } };
+  if (user?.role === 'client') {
+    where.matter = {
+      OR: [
+        { client: { user_id: user.id } },
+        { parties: { some: { user_id: user.id } } }
+      ]
+    };
+  }
 
   const invoices = await prisma.invoice.findMany({
     where,
@@ -335,7 +398,10 @@ const getInvoicePdf = async (id, user) => {
     err.statusCode = 403;
     throw err;
   }
-  const buffer = await buildInvoicePdfBuffer(invoice);
+  const computed = calculateInvoiceFields(invoice);
+  // Match frontend status mapping: 'draft' displays as 'pending'
+  if (computed.status === 'draft') computed.status = 'pending';
+  const buffer = await buildInvoicePdfBuffer(computed);
   const safeName = String(invoice.invoice_number || invoice.id).replace(/[^a-zA-Z0-9._-]/g, '_');
   const filename = `invoice-${safeName}.pdf`;
   return { buffer, filename };

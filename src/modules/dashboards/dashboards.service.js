@@ -342,12 +342,36 @@ const getClientStats = async (userId) => {
   }
 
   const [matters, invoices, drafts] = await Promise.all([
-    prisma.matter.count({ where: { client_id: client.id, status: { in: ['active', 'pending'] } } }),
+    prisma.matter.count({
+      where: {
+        OR: [
+          { client_id: client.id },
+          { parties: { some: { id: client.id } } }
+        ],
+        status: { in: ['active', 'pending'] }
+      }
+    }),
     prisma.invoice.count({
-      where: { matter: { client_id: client.id }, status: { in: ['unpaid', 'overdue', 'draft', 'due'] } },
+      where: {
+        matter: {
+          OR: [
+            { client_id: client.id },
+            { parties: { some: { id: client.id } } }
+          ]
+        },
+        status: { in: ['unpaid', 'overdue', 'draft', 'due'] }
+      },
     }),
     prisma.draft.count({
-      where: { matter: { client_id: client.id }, status: 'sent_for_signature' },
+      where: {
+        matter: {
+          OR: [
+            { client_id: client.id },
+            { parties: { some: { id: client.id } } }
+          ]
+        },
+        status: 'sent_for_signature'
+      },
     }),
   ]);
 

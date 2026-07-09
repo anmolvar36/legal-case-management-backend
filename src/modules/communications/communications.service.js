@@ -10,7 +10,12 @@ const communicationScope = (user) => {
   }
   if (user.role === 'client') {
     return {
-      matter: { client: { user_id: user.id } },
+      matter: {
+        OR: [
+          { client: { user_id: user.id } },
+          { parties: { some: { user_id: user.id } } }
+        ]
+      },
       visibility: { in: ['client_visible', 'client_shared'] },
     };
   }
@@ -83,28 +88,45 @@ const replyToThread = async (data, user) => {
 
   // Notify recipient
   const matter = await prisma.matter.findUnique({
-    where: { id: parent.matter_id },
-    include: { client: { select: { user_id: true } } }
+    where: { id: parent.matter_id }
   });
 
-  let recipientId = null;
   if (user?.role === 'client') {
-    recipientId = matter.assigned_lawyer_id;
-  } else {
-    // If lawyer/admin replies, and the thread is client_visible, notify client
-    if (parent.visibility === 'client_visible' || parent.visibility === 'client_shared') {
-      recipientId = matter.client?.user_id;
+    const recipientId = matter.assigned_lawyer_id;
+    if (recipientId && recipientId !== user.id) {
+      await notificationsService.createNotification({
+        user_id: recipientId,
+        title: 'New Reply Received',
+        message: `${user.full_name} replied to a message in matter ${matter.matter_number}.`,
+        type: 'system',
+        reference_id: parent.matter_id
+      });
     }
-  }
-
-  if (recipientId && recipientId !== user.id) {
-    await notificationsService.createNotification({
-      user_id: recipientId,
-      title: 'New Reply Received',
-      message: `${user.full_name} replied to a message in matter ${matter.matter_number}.`,
-      type: 'system',
-      reference_id: parent.matter_id
-    });
+  } else {
+    // If lawyer/admin replies, and the thread is client_visible, notify all clients
+    if (parent.visibility === 'client_visible' || parent.visibility === 'client_shared') {
+      const clients = await prisma.client.findMany({
+        where: {
+          OR: [
+            { id: matter.client_id },
+            { matter_parties: { some: { id: parent.matter_id } } }
+          ],
+          user_id: { not: null }
+        },
+        select: { user_id: true }
+      });
+      for (const c of clients) {
+        if (c.user_id && c.user_id !== user.id) {
+          await notificationsService.createNotification({
+            user_id: c.user_id,
+            title: 'New Reply Received',
+            message: `${user.full_name} replied to a message in matter ${matter.matter_number}.`,
+            type: 'system',
+            reference_id: parent.matter_id
+          });
+        }
+      }
+    }
   }
 
   return reply;
@@ -128,7 +150,15 @@ const getById = async (id, user) => {
     }
   }
   if (user?.role === 'client') {
-    const ok = await prisma.matter.count({ where: { id: comm.matter_id, client: { user_id: user.id } } });
+    const ok = await prisma.matter.count({
+      where: {
+        id: comm.matter_id,
+        OR: [
+          { client: { user_id: user.id } },
+          { parties: { some: { user_id: user.id } } }
+        ]
+      }
+    });
     if (!ok || (comm.visibility !== 'client_visible' && comm.visibility !== 'client_shared')) {
       const err = new Error('Not authorized to access this communication');
       err.statusCode = 403;
@@ -151,7 +181,13 @@ const create = async (data, user) => {
   }
   if (user?.role === 'client') {
     const allowed = await prisma.matter.count({
-      where: { id: parseInt(data.matter_id), client: { user_id: user.id } },
+      where: {
+        id: parseInt(data.matter_id),
+        OR: [
+          { client: { user_id: user.id } },
+          { parties: { some: { user_id: user.id } } }
+        ]
+      },
     });
     if (!allowed) {
       const err = new Error('Not authorized to message on this matter');
@@ -187,25 +223,42 @@ const create = async (data, user) => {
 
   // Notify recipient
   const matter = await prisma.matter.findUnique({
-    where: { id: message.matter_id },
-    include: { client: { select: { user_id: true } } }
+    where: { id: message.matter_id }
   });
 
-  let recipientId = null;
   if (user?.role === 'client') {
-    recipientId = matter.assigned_lawyer_id;
+    const recipientId = matter.assigned_lawyer_id;
+    if (recipientId) {
+      await notificationsService.createNotification({
+        user_id: recipientId,
+        title: 'New Message Received',
+        message: `${user.full_name} sent you a message regarding matter ${matter.matter_number}.`,
+        type: 'system',
+        reference_id: message.matter_id
+      });
+    }
   } else {
-    recipientId = matter.client?.user_id;
-  }
-
-  if (recipientId) {
-    await notificationsService.createNotification({
-      user_id: recipientId,
-      title: 'New Message Received',
-      message: `${user.full_name} sent you a message regarding matter ${matter.matter_number}.`,
-      type: 'system',
-      reference_id: message.matter_id
+    const clients = await prisma.client.findMany({
+      where: {
+        OR: [
+          { id: matter.client_id },
+          { matter_parties: { some: { id: message.matter_id } } }
+        ],
+        user_id: { not: null }
+      },
+      select: { user_id: true }
     });
+    for (const c of clients) {
+      if (c.user_id && c.user_id !== user.id) {
+        await notificationsService.createNotification({
+          user_id: c.user_id,
+          title: 'New Message Received',
+          message: `${user.full_name} sent you a message regarding matter ${matter.matter_number}.`,
+          type: 'system',
+          reference_id: message.matter_id
+        });
+      }
+    }
   }
 
   return message;
