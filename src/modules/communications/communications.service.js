@@ -23,12 +23,13 @@ const communicationScope = (user) => {
 };
 
 const getAll = async (query, user) => {
-  const { matter_id, visibility, communication_type, page = 1, limit = 100 } = query;
+  const { matter_id, activity_id, visibility, communication_type, page = 1, limit = 100 } = query;
   const take = parseInt(limit);
   const skip = (parseInt(page) - 1) * take;
 
   const where = { ...communicationScope(user), parent_id: null };
   if (matter_id) where.matter_id = parseInt(matter_id);
+  if (activity_id) where.activity_id = parseInt(activity_id);
   if (visibility) where.visibility = visibility;
   if (communication_type) where.communication_type = communication_type;
 
@@ -141,7 +142,7 @@ const getById = async (id, user) => {
     }
   });
   if (!comm) return null;
-  if (user?.role === 'lawyer') {
+  if (comm.matter_id && user?.role === 'lawyer') {
     const ok = await prisma.matter.count({ where: { id: comm.matter_id, assigned_lawyer_id: user.id } });
     if (!ok) {
       const err = new Error('Not authorized to access this communication');
@@ -149,7 +150,7 @@ const getById = async (id, user) => {
       throw err;
     }
   }
-  if (user?.role === 'client') {
+  if (comm.matter_id && user?.role === 'client') {
     const ok = await prisma.matter.count({
       where: {
         id: comm.matter_id,
@@ -169,7 +170,7 @@ const getById = async (id, user) => {
 };
 
 const create = async (data, user) => {
-  if (user?.role === 'lawyer') {
+  if (data.matter_id && user?.role === 'lawyer') {
     const allowed = await prisma.matter.count({
       where: { id: parseInt(data.matter_id), assigned_lawyer_id: user.id },
     });
@@ -179,7 +180,7 @@ const create = async (data, user) => {
       throw err;
     }
   }
-  if (user?.role === 'client') {
+  if (data.matter_id && user?.role === 'client') {
     const allowed = await prisma.matter.count({
       where: {
         id: parseInt(data.matter_id),
@@ -201,10 +202,15 @@ const create = async (data, user) => {
 
   // Ensure consistent types
   if (data.matter_id) data.matter_id = parseInt(data.matter_id);
+  if (data.activity_id) data.activity_id = parseInt(data.activity_id);
   
   // Set sender from session
   data.sender_user_id = user.id;
   data.sender_role = user.role;
+
+  if (Array.isArray(data.to)) data.to = data.to.join(', ') || null;
+  if (Array.isArray(data.cc)) data.cc = data.cc.join(', ') || null;
+  if (Array.isArray(data.bcc)) data.bcc = data.bcc.join(', ') || null;
 
   const message = await prisma.communication.create({ data });
   
@@ -222,11 +228,14 @@ const create = async (data, user) => {
   });
 
   // Notify recipient
-  const matter = await prisma.matter.findUnique({
-    where: { id: message.matter_id }
-  });
+  let matter = null;
+  if (message.matter_id) {
+    matter = await prisma.matter.findUnique({
+      where: { id: message.matter_id }
+    });
+  }
 
-  if (user?.role === 'client') {
+  if (matter && user?.role === 'client') {
     const recipientId = matter.assigned_lawyer_id;
     if (recipientId) {
       await notificationsService.createNotification({
@@ -237,7 +246,7 @@ const create = async (data, user) => {
         reference_id: message.matter_id
       });
     }
-  } else {
+  } else if (matter) {
     const clients = await prisma.client.findMany({
       where: {
         OR: [

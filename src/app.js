@@ -56,6 +56,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/dashboards', dashboardRoutes);
 app.use('/api/tasks', require('./modules/tasks/tasks.routes'));
+app.use('/api/activities', require('./modules/activities/activities.routes'));
 
 // Error Handling
 app.use(errorHandler);

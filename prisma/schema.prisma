@@ -100,6 +100,7 @@ model User {
   created_templates Template[] @relation("CreatedTemplates")
   assigned_tasks  Task[]       @relation("AssignedTasks")
   created_tasks   Task[]       @relation("CreatedTasks")
+  event_attendances EventAttendee[]
 
   @@map("users")
 }
@@ -272,12 +273,16 @@ model Document {
 
 model Communication {
   id                 Int               @id @default(autoincrement())
-  matter_id          Int
+  matter_id          Int?
+  activity_id        Int?
   sender_user_id     Int
   sender_role        Role
   subject            String?
   parent_id          Int?
   message_body       String            @db.Text
+  to                 String?           @db.Text
+  cc                 String?           @db.Text
+  bcc                String?           @db.Text
   visibility         Visibility        @default(internal)
   communication_type CommunicationType @default(portal_message)
   is_read            Boolean          @default(false)
@@ -285,7 +290,8 @@ model Communication {
   created_at         DateTime          @default(now())
   updated_at         DateTime          @updatedAt
 
-  matter             Matter            @relation(fields: [matter_id], references: [id])
+  matter             Matter?           @relation(fields: [matter_id], references: [id])
+  generic_activity   GenericActivity?  @relation(fields: [activity_id], references: [id])
   sender             User              @relation(fields: [sender_user_id], references: [id])
   parent             Communication?    @relation("Thread", fields: [parent_id], references: [id])
   replies            Communication[]   @relation("Thread")
@@ -498,6 +504,7 @@ model CalendarEvent {
   event_date      DateTime
   end_date        DateTime?
   matter_id       Int?
+  activity_id     Int?
   type            String   // hearing, meeting, deadline, court_date, trial, consultation, general
   description     String?  @db.Text
   reminder_date   DateTime?
@@ -516,8 +523,11 @@ model CalendarEvent {
   reminder_sent_3d       Boolean  @default(false)
   reminder_sent_1d       Boolean  @default(false)
   reminder_sent_same_day Boolean  @default(false)
+  create_task            Boolean  @default(false)
 
   matter          Matter?  @relation(fields: [matter_id], references: [id])
+  generic_activity GenericActivity? @relation(fields: [activity_id], references: [id])
+  attendees       EventAttendee[]
 
   @@map("calendar_events")
 }
@@ -674,6 +684,7 @@ model Task {
   task_type          String?   @default("general")
   assigned_user_id   Int?
   matter_id          Int?
+  activity_id        Int?
   due_date           DateTime?
   completed_at       DateTime?
   reminder_date      DateTime?
@@ -685,6 +696,38 @@ model Task {
   assigned_user      User?     @relation("AssignedTasks", fields: [assigned_user_id], references: [id])
   created_by         User      @relation("CreatedTasks", fields: [created_by_user_id], references: [id])
   matter             Matter?   @relation(fields: [matter_id], references: [id])
+  generic_activity   GenericActivity? @relation(fields: [activity_id], references: [id])
 
   @@map("tasks")
+}
+
+model GenericActivity {
+  id          Int      @id @default(autoincrement())
+  title       String
+  type        String
+  description String?  @db.Text
+  status      String?  @default("Open")
+  created_by  Int?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  tasks          Task[]
+  events         CalendarEvent[]
+  communications Communication[]
+
+  @@map("generic_activities")
+}
+
+model EventAttendee {
+  id         Int      @id @default(autoincrement())
+  event_id   Int
+  user_id    Int?     
+  email      String?  
+  status     String   @default("pending") 
+  created_at DateTime @default(now())
+
+  event      CalendarEvent @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user       User?         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("event_attendees")
 }

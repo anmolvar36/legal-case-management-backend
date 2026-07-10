@@ -8,10 +8,11 @@ exports.getAllEvents = async () => {
   // 1. Invoice due
   const invoices = await prisma.invoice.findMany({
     where: { due_date: { not: null } },
-    select: { id: true, invoice_number: true, amount: true, due_date: true, status: true, description: true }
+    select: { id: true, invoice_number: true, amount: true, due_date: true, status: true, description: true, matter: { select: { status: true } } }
   });
 
   invoices.forEach(i => {
+    if (i.matter && i.matter.status === 'completed') return;
     events.push({
       id: i.id,
       title: `Invoice ${i.invoice_number} due`,
@@ -26,7 +27,8 @@ exports.getAllEvents = async () => {
 
   // 2. Matters
   const matters = await prisma.matter.findMany({
-    select: { id: true, title: true, created_at: true, matter_number: true, description: true }
+    where: { status: { not: 'completed' } },
+    select: { id: true, title: true, created_at: true, closed_at: true, updated_at: true, status: true, matter_number: true, description: true }
   });
 
   matters.forEach(m => {
@@ -45,11 +47,13 @@ exports.getAllEvents = async () => {
   // 3. Manual events
   const custom = await prisma.calendarEvent.findMany({
     include: {
-      matter: { select: { matter_number: true, title: true } }
+      matter: { select: { matter_number: true, title: true, status: true } },
+      attendees: { include: { user: { select: { full_name: true, email: true } } } }
     }
   });
 
   custom.forEach(e => {
+    if (e.matter && e.matter.status === 'completed') return;
     events.push({
       id: e.id,
       title: e.title,
@@ -64,7 +68,10 @@ exports.getAllEvents = async () => {
       court_name: e.court_name,
       court_room: e.court_room,
       judge_name: e.judge_name,
-      is_court_event: e.is_court_event || e.court_related || false
+      is_court_event: e.is_court_event || e.court_related || false,
+      attendees: e.attendees || [],
+      reminder_date: e.reminder_date,
+      create_task: e.create_task
     });
   });
 
@@ -84,24 +91,39 @@ exports.createEvent = async (userId, body) => {
   const courtRelatedTypes = ['court_date', 'hearing', 'trial', 'filing_deadline', 'motion', 'mediation', 'conference'];
   const isCourtRelated = courtRelatedTypes.includes(type) || body.is_court_event === true;
 
+  const eventData = {
+    title: body.title,
+    event_date: eventDate,
+    end_date: body.end_date ? new Date(body.end_date) : null,
+    reminder_date: body.reminder_date ? new Date(body.reminder_date) : null,
+    event_status: body.event_status || 'scheduled',
+    court_related: isCourtRelated,
+    matter_id: body.matter_id ? Number(body.matter_id) : null,
+    activity_id: body.activity_id ? Number(body.activity_id) : null,
+    type: type,
+    description: body.description || null,
+    created_by: userId,
+    appearance_type: body.appearance_type || null,
+    court_name: body.court_name || null,
+    court_room: body.court_room || null,
+    judge_name: body.judge_name || null,
+    is_court_event: isCourtRelated,
+    create_task: isCourtRelated && body.create_task === true
+  };
+
+  if (body.attendees && body.attendees.length > 0) {
+    eventData.attendees = {
+      create: body.attendees.map(a => ({
+        user_id: a.user_id ? Number(a.user_id) : null,
+        email: a.email || null,
+        status: 'pending'
+      }))
+    };
+  }
+
   const event = await prisma.calendarEvent.create({
-    data: {
-      title: body.title,
-      event_date: eventDate,
-      end_date: body.end_date ? new Date(body.end_date) : null,
-      reminder_date: body.reminder_date ? new Date(body.reminder_date) : null,
-      event_status: body.event_status || 'scheduled',
-      court_related: isCourtRelated,
-      matter_id: body.matter_id ? Number(body.matter_id) : null,
-      type: type,
-      description: body.description || null,
-      created_by: userId,
-      appearance_type: body.appearance_type || null,
-      court_name: body.court_name || null,
-      court_room: body.court_room || null,
-      judge_name: body.judge_name || null,
-      is_court_event: isCourtRelated
-    }
+    data: eventData,
+    include: { attendees: true }
   });
 
   // Task generation for court-related events (Hearing, Trial, Filing Deadline)
@@ -166,6 +188,24 @@ exports.createEvent = async (userId, body) => {
         type: 'deadline',
         reference_id: event.matter_id
       });
+    }
+  }
+
+  if (event.attendees && event.attendees.length > 0) {
+    for (const attendee of event.attendees) {
+      if (attendee.user_id && attendee.user_id !== userId) {
+        await notificationsService.createNotification({
+          user_id: attendee.user_id,
+          title: `Calendar Invitation: ${event.title}`,
+          message: `You have been invited to an event scheduled for ${event.event_date.toLocaleDateString()}.`,
+          type: 'system',
+          reference_id: event.id
+        });
+      } else if (attendee.email) {
+        // Prepare backend for future email invitation sending.
+        // E.g., emailService.sendCalendarInvite(attendee.email, event);
+        console.log(`[Calendar] Invitation pending for external attendee: ${attendee.email}. Email provider not configured.`);
+      }
     }
   }
 
