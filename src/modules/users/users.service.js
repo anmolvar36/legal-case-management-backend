@@ -237,10 +237,10 @@ const remove = async (id) => {
       // Delete calendar events
       await prisma.calendarEvent.deleteMany({ where: { matter_id: { in: matterIds } } });
       
-      // Delete invoices
-      await prisma.invoice.deleteMany({ where: { matter_id: { in: matterIds } } });
       // Delete payments
       await prisma.payment.deleteMany({ where: { matter_id: { in: matterIds } } });
+      // Delete invoices
+      await prisma.invoice.deleteMany({ where: { matter_id: { in: matterIds } } });
       
       // Delete documents
       await prisma.document.deleteMany({ where: { matter_id: { in: matterIds } } });
@@ -249,23 +249,11 @@ const remove = async (id) => {
       await prisma.trustTransaction.deleteMany({ where: { matter_id: { in: matterIds } } });
     }
 
-    // Delete payments for invoices of this client
-    await prisma.payment.deleteMany({
-      where: {
-        invoice: {
-          client_id: clientId
-        }
-      }
-    });
-
     // Delete trust transactions for this client
     await prisma.trustTransaction.deleteMany({ where: { client_id: clientId } });
 
     // Delete trust account for this client
     await prisma.trustAccount.deleteMany({ where: { client_id: clientId } });
-
-    // Delete invoices for this client
-    await prisma.invoice.deleteMany({ where: { client_id: clientId } });
 
     // Clear client references from converted leads
     await prisma.lead.updateMany({

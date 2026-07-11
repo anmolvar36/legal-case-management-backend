@@ -1,0 +1,67 @@
+﻿
+Date,Quantity,Price,Note,CreatedAt,LastModified,Total,BilledState,UniqueId,SubjectType,FlatRate,Matter,Subject,ActivityDescription,ContactNote,DocumentVersion,Task,Updater,User,Communication,Import,Creator,MatterNote,CalendarEntry,ActivityLineItem,MatterId,CurrencyCode
+12/31/2025,1.0,33000.0,Out of court settlement,12/31/2025 8:16 PM UTC,12/31/2025 8:16 PM UTC,33000.0,0,7405238731,"",true,"","","Contingency Fee: 33.0% of $100,000.00","","","","","Victoria Tulsidas, Esq.","","","","","","","",USD
+12/31/2025,1.0,300.0,Filed Papers with Court Clerk,12/31/2025 8:19 PM UTC,12/31/2025 8:19 PM UTC,300.0,9,7405246501,"",false,"","","","","","","","Victoria Tulsidas, Esq.","","","","","","","",USD
+12/31/2025,0.0,300.0,"",12/31/2025 8:22 PM UTC,12/31/2025 8:22 PM UTC,0.0,9,7405253341,"",false,"","",Email to Plaintiff,"","","","","Victoria Tulsidas, Esq.","","","","","","","",USD
+01/06/2026,1.0,5000.0,Flat rate,01/06/2026 9:05 PM UTC,01/06/2026 9:05 PM UTC,5000.0,0,7414532161,"",true,00002-Cabler Sampson: Immigration Filing Under Humanitarian Expedition,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1759532896,USD
+01/13/2026,1.0,2000.0,Flat rate,01/13/2026 10:01 PM UTC,01/16/2026 6:52 PM UTC,2000.0,4,7431515926,"",true,00003-McMillan-Blake: Limited Scope Representation Wrongful Death in Care Facility,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1760620456,USD
+01/13/2026,0.1,0.0,Medical Records and Logged,01/13/2026 10:04 PM UTC,01/13/2026 10:04 PM UTC,0.0,9,7431531046,"",false,00003-McMillan-Blake: Limited Scope Representation Wrongful Death in Care Facility,"","","","","","","Victoria Tulsidas, Esq.",Phone call: Medical Records and Logged,"","","","","",1760620456,USD
+01/16/2026,1.0,1000.0,Flat rate,01/16/2026 6:41 PM UTC,01/16/2026 6:41 PM UTC,1000.0,0,7439250586,"",true,00004-Lamin: USCIS Profile Inquiry,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1761249196,USD
+01/23/2026,1.0,5000.0,Flat rate,01/23/2026 6:17 PM UTC,01/23/2026 6:17 PM UTC,5000.0,0,7454898226,"",true,00006-DMG Wellness: Breach of Commerical Lease Agreement,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1762290586,USD
+02/02/2026,2.93,0.0,Settlement Attempt,02/02/2026 5:13 PM UTC,02/02/2026 8:09 PM UTC,0.0,0,7481448406,"",false,00006-DMG Wellness: Breach of Commerical Lease Agreement,"","","","","","","Victoria Tulsidas, Esq.",Phone call: Settlement Attempt,"","","","","",1762290586,USD
+02/10/2026,1.0,0.0,Requests for Records,02/11/2026 1:26 AM UTC,02/11/2026 1:26 AM UTC,0.0,0,7509373321,"",false,"","","",Requests for Records,"","","","Victoria Tulsidas, Esq.","","","","","","","",USD
+02/07/2026,1.2,350.0,"Case Intake & Initial Strategy Conference
+1.2 hours
+
+Initial consultation and factual intake
+
+Review of employment history and probationary status
+
+Discussion of medical conditions and accommodation requests
+
+Strategic assessment of claims under Rehab Act and Title VII",02/12/2026 1:51 AM UTC,02/12/2026 11:15 PM UTC,420.0,4,7512280201,"",false,00012-Buck: Wronful Termination Mediation,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1765616401,USD
+02/09/2026,2.3,350.0,"Document Review & Chronology Analysis
+2.3 hours
+
+Review of Reasonable Accommodation requests and determinations
+
+Review of EEO Counselor Notices
+
+Review of termination documentation
+
+Review of scholarship (EISP) obligations and related directives
+
+Review of employee-drafted case summary
+
+Development of detailed chronological timeline",02/12/2026 1:51 AM UTC,02/12/2026 11:15 PM UTC,805.0,4,7512280216,"",false,00012-Buck: Wronful Termination Mediation,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1765616401,USD
+02/11/2026,1.8,350.0,"Legal Research & Statutory Analysis
+1.8 hours
+
+Research regarding federal-sector “make whole” remedies
+
+Analysis of Rehabilitation Act standards
+
+Review of VA Handbook and VHA Directive requirements
+
+Research on front pay, compensatory caps, and fee-shifting
+
+Review of 180-day appointment rule implications.",02/12/2026 1:51 AM UTC,02/12/2026 11:15 PM UTC,630.0,4,7512280231,"",false,00012-Buck: Wronful Termination Mediation,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1765616401,USD
+02/11/2026,0.7,350.0,"Mediation Preparation & Agreement Execution
+0.7 hours
+
+Review and execution of Agreement to Mediate
+
+Analysis of confidentiality provisions under ADRA
+
+Preliminary mediation positioning",02/12/2026 1:51 AM UTC,02/12/2026 11:15 PM UTC,245.0,4,7512280246,"",false,00012-Buck: Wronful Termination Mediation,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1765616401,USD
+02/11/2026,2.0,350.0,"Client Counseling & Strategy Sessions
+2.0 hours
+
+Counseling regarding reinstatement vs. separation remedies
+
+Discussion of damages model (back pay, front pay, vesting impact)
+
+Discussion of scholarship waiver exposure
+
+Mediation preparation and settlement posture",02/12/2026 1:51 AM UTC,02/12/2026 11:15 PM UTC,700.0,4,7512280261,"",false,00012-Buck: Wronful Termination Mediation,"","","","","","","Victoria Tulsidas, Esq.","","","","","","",1765616401,USD
+04/10/2026,0.01,0.0,"",04/10/2026 6:06 PM UTC,04/10/2026 6:06 PM UTC,0.0,0,7642721266,"",false,"","","","","","","","Victoria Tulsidas, Esq.","","","","","","","",USD

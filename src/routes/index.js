@@ -23,6 +23,7 @@ const customFieldsRoutes = require('../modules/settings/customFields.routes');
 const notificationRoutes = require('../modules/notifications/notifications.routes');
 const templatesRoutes = require('../modules/templates/templates.routes');
 const searchRoutes = require('../modules/search/search.routes');
+const importRoutes = require('../modules/import/import.routes');
 
 const marketingController = require('../modules/marketing/marketing.controller');
 const { protect } = require('../middlewares/auth.middleware');
@@ -54,5 +55,6 @@ router.use('/timers', timersRoutes);
 router.use('/reports', reportsRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/templates', templatesRoutes);
+router.use('/import', importRoutes);
 
 module.exports = router;

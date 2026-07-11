@@ -17,10 +17,12 @@ const taskScope = (user) => {
 };
 
 const getAll = async (query, user) => {
-  const { matter_id, status, priority, assigned_to, task_type, overdue } = query;
+  const { matter_id, activity_id, status, priority, assigned_to, task_type, overdue } = query;
+
   const where = { ...taskScope(user) };
 
   if (matter_id) where.matter_id = parseInt(matter_id);
+  if (activity_id) where.activity_id = parseInt(activity_id);
   if (status) where.status = status;
   if (priority) where.priority = priority;
   if (task_type) where.task_type = task_type;
@@ -72,6 +74,7 @@ const create = async (data, user) => {
     task_type: data.task_type || 'general',
     assigned_user_id: data.assigned_user_id ? parseInt(data.assigned_user_id) : null,
     matter_id: data.matter_id ? parseInt(data.matter_id) : null,
+    activity_id: data.activity_id ? parseInt(data.activity_id) : null,
     due_date: data.due_date ? new Date(data.due_date) : null,
     reminder_date: data.reminder_date ? new Date(data.reminder_date) : null,
     created_by_user_id: user.id
@@ -100,7 +103,7 @@ const create = async (data, user) => {
       title: 'Task Assigned',
       message: `You have been assigned a new task: ${task.title}`,
       type: 'system',
-      reference_id: task.matter_id || task.id
+      reference_id: task.matter_id || task.activity_id || task.id
     });
   }
 
@@ -118,6 +121,7 @@ const update = async (id, data, user) => {
     task_type: data.task_type !== undefined ? data.task_type : task.task_type,
     assigned_user_id: data.assigned_user_id !== undefined ? (data.assigned_user_id ? parseInt(data.assigned_user_id) : null) : task.assigned_user_id,
     matter_id: data.matter_id !== undefined ? (data.matter_id ? parseInt(data.matter_id) : null) : task.matter_id,
+    activity_id: data.activity_id !== undefined ? (data.activity_id ? parseInt(data.activity_id) : null) : task.activity_id,
     due_date: data.due_date !== undefined ? (data.due_date ? new Date(data.due_date) : null) : task.due_date,
     reminder_date: data.reminder_date !== undefined ? (data.reminder_date ? new Date(data.reminder_date) : null) : task.reminder_date,
   };
@@ -134,7 +138,7 @@ const update = async (id, data, user) => {
       title: 'Task Assigned',
       message: `You have been assigned a task: ${updatedTask.title}`,
       type: 'system',
-      reference_id: updatedTask.matter_id || updatedTask.id
+      reference_id: updatedTask.matter_id || updatedTask.activity_id || updatedTask.id
     });
   }
 
@@ -172,7 +176,7 @@ const completeTask = async (id, user) => {
       title: 'Task Completed',
       message: `Task completed: ${task.title}`,
       type: 'system',
-      reference_id: task.matter_id || task.id
+      reference_id: task.matter_id || task.activity_id || task.id
     });
   }
 
