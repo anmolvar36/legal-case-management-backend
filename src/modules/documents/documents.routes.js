@@ -17,7 +17,12 @@ const storage = multer.diskStorage({
     cb(null, `${Date.now()}-${safeOriginal}`);
   },
 });
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: {
+    fileSize: 30 * 1024 * 1024 // 30MB limit
+  }
+});
 
 router.use(protect);
 

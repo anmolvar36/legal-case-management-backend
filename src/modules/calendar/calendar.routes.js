@@ -7,4 +7,12 @@ router.get('/', protect, calendarController.getEvents);
 router.post('/', protect, calendarController.addEvent);
 router.put('/:id/acknowledge', protect, calendarController.acknowledgeEvent);
 
+router.get('/outlook/connect', protect, calendarController.connectOutlook);
+router.get('/outlook/callback', calendarController.callbackOutlook);
+router.post('/outlook/disconnect', protect, calendarController.disconnectOutlook);
+router.get('/outlook/status', protect, calendarController.getStatusOutlook);
+
+router.put('/:id', protect, calendarController.updateEvent);
+router.delete('/:id', protect, calendarController.deleteEvent);
+
 module.exports = router;

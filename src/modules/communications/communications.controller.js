@@ -92,4 +92,34 @@ module.exports = {
   markMatterRead,
   getThread,
   reply,
+  trackOpen: async (req, res, next) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!isNaN(id)) {
+        await service.registerOpen(id);
+      }
+      const pixel = Buffer.from(
+        'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        'base64'
+      );
+      res.writeHead(200, {
+        'Content-Type': 'image/gif',
+        'Content-Length': pixel.length,
+        'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      });
+      res.end(pixel);
+    } catch (err) {
+      console.error('Tracking pixel error:', err);
+      // Fallback: return pixel anyway so image does not appear broken
+      const pixel = Buffer.from(
+        'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        'base64'
+      );
+      res.writeHead(200, {
+        'Content-Type': 'image/gif',
+        'Content-Length': pixel.length,
+      });
+      res.end(pixel);
+    }
+  },
 };

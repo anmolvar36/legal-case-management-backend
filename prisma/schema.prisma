@@ -101,6 +101,10 @@ model User {
   assigned_tasks  Task[]       @relation("AssignedTasks")
   created_tasks   Task[]       @relation("CreatedTasks")
   event_attendances EventAttendee[]
+  outlook_token String? @db.Text
+  outlook_refresh_token String? @db.Text
+  outlook_token_expires DateTime?
+  signature             String? @db.Text
 
   @@map("users")
 }
@@ -287,6 +291,11 @@ model Communication {
   communication_type CommunicationType @default(portal_message)
   is_read            Boolean          @default(false)
   read_at            DateTime?
+  request_read_receipt Boolean        @default(false)
+  track_opens          Boolean        @default(false)
+  opened              Boolean        @default(false)
+  opened_time         DateTime?
+  open_count          Int            @default(0)
   created_at         DateTime          @default(now())
   updated_at         DateTime          @updatedAt
 
@@ -524,6 +533,17 @@ model CalendarEvent {
   reminder_sent_1d       Boolean  @default(false)
   reminder_sent_same_day Boolean  @default(false)
   create_task            Boolean  @default(false)
+  outlook_event_id String?
+  outlook_series_id String?
+  recurrence_rule String?
+  busy_status     String?
+  categories      Json?
+  location        String?
+  is_all_day      Boolean  @default(false)
+  timezone        String?
+  importance      String?  @default("normal")
+  is_online_meeting Boolean @default(false)
+  attachments     Json?
 
   matter          Matter?  @relation(fields: [matter_id], references: [id])
   generic_activity GenericActivity? @relation(fields: [activity_id], references: [id])
@@ -719,12 +739,13 @@ model GenericActivity {
 }
 
 model EventAttendee {
-  id         Int      @id @default(autoincrement())
-  event_id   Int
-  user_id    Int?     
-  email      String?  
-  status     String   @default("pending") 
-  created_at DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  event_id    Int
+  user_id     Int?     
+  email       String?  
+  status      String   @default("pending") 
+  is_optional Boolean  @default(false)
+  created_at  DateTime @default(now())
 
   event      CalendarEvent @relation(fields: [event_id], references: [id], onDelete: Cascade)
   user       User?         @relation(fields: [user_id], references: [id], onDelete: Cascade)

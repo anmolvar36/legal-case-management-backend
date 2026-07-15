@@ -51,10 +51,23 @@ const changePassword = async (req, res, next) => {
   }
 };
 
+const updateSignature = async (req, res, next) => {
+  try {
+    const { signature } = req.body;
+    const userId = req.user.id;
+    const data = await authService.updateSignature(userId, signature);
+    res.status(200).json(sendResponse(true, 'Signature updated successfully', data));
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   login,
   register,
   getMe,
   logout,
   changePassword,
+  updateSignature,
 };
+

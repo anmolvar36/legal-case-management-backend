@@ -114,8 +114,17 @@ const changePassword = async (userId, currentPassword, newPassword) => {
   return { success: true, message: 'Password updated successfully' };
 };
 
+const updateSignature = async (userId, signature) => {
+  return await prisma.user.update({
+    where: { id: userId },
+    data: { signature },
+    select: { id: true, signature: true }
+  });
+};
+
 module.exports = {
   login,
   register,
   changePassword,
+  updateSignature,
 };

@@ -3,6 +3,8 @@ const router = express.Router();
 const controller = require('./communications.controller');
 const { protect } = require('../../middlewares/auth.middleware');
 
+router.get('/track/:id', controller.trackOpen);
+
 router.use(protect);
 
 router.get('/', controller.getAll);

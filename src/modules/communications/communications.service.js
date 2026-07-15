@@ -208,11 +208,27 @@ const create = async (data, user) => {
   data.sender_user_id = user.id;
   data.sender_role = user.role;
 
+  const request_read_receipt = data.request_read_receipt === true || data.request_read_receipt === 'true';
+  const track_opens = data.track_opens === true || data.track_opens === 'true';
+  data.request_read_receipt = request_read_receipt;
+  data.track_opens = track_opens;
+
   if (Array.isArray(data.to)) data.to = data.to.join(', ') || null;
   if (Array.isArray(data.cc)) data.cc = data.cc.join(', ') || null;
   if (Array.isArray(data.bcc)) data.bcc = data.bcc.join(', ') || null;
 
-  const message = await prisma.communication.create({ data });
+  let message = await prisma.communication.create({ data });
+
+  if (message.track_opens) {
+    const trackingUrl = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/communications/track/${message.id}`;
+    const trackingPixel = `<img src="${trackingUrl}" width="1" height="1" style="display:none;" />`;
+    message = await prisma.communication.update({
+      where: { id: message.id },
+      data: {
+        message_body: `${message.message_body}\n${trackingPixel}`
+      }
+    });
+  }
   
   // Log activity with descriptive text
   const typeLabel = (message.communication_type || 'communication').replace(/_/g, ' ');
@@ -353,6 +369,20 @@ const markMatterRead = async (matterId, user) => {
 };
 
 
+const registerOpen = async (id) => {
+  const comm = await prisma.communication.findUnique({ where: { id } });
+  if (comm && comm.track_opens) {
+    await prisma.communication.update({
+      where: { id },
+      data: {
+        opened: true,
+        opened_time: comm.opened_time || new Date(),
+        open_count: { increment: 1 }
+      }
+    });
+  }
+};
+
 module.exports = {
   getAll,
   getById,
@@ -363,4 +393,5 @@ module.exports = {
   markMatterRead,
   getThread,
   replyToThread,
+  registerOpen,
 };

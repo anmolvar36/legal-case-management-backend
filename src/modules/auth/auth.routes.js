@@ -9,6 +9,7 @@ router.post('/login', validate(authSchema.login), authController.login);
 router.post('/register', validate(authSchema.register), authController.register);
 router.get('/me', protect, authController.getMe);
 router.patch('/change-password', protect, authController.changePassword);
+router.put('/signature', protect, authController.updateSignature);
 router.post('/logout', authController.logout);
 
 module.exports = router;

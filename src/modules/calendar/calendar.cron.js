@@ -8,6 +8,32 @@ cron.schedule('0 * * * *', async () => {
   await exports.checkReminders();
 });
 
+// Run every 5 minutes to pull outlook changes
+cron.schedule('*/5 * * * *', async () => {
+  await exports.syncOutlookCalendar();
+});
+
+exports.syncOutlookCalendar = async () => {
+  try {
+    console.log('[Calendar Cron] Running Outlook Calendar synchronization...');
+    const outlookService = require('./outlook.service');
+    
+    const connectedUsers = await prisma.user.findMany({
+      where: {
+        outlook_refresh_token: { not: null }
+      },
+      select: { id: true }
+    });
+
+    console.log(`[Calendar Cron] Found ${connectedUsers.length} users with active Outlook integration.`);
+    for (const user of connectedUsers) {
+      await outlookService.pullChanges(user.id);
+    }
+  } catch (error) {
+    console.error('[Calendar Cron Error] Outlook sync failed:', error.message);
+  }
+};
+
 exports.checkReminders = async () => {
   try {
     console.log('[Calendar Cron] Running court event reminder check...');
