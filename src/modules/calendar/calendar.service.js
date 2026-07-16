@@ -368,3 +368,71 @@ exports.deleteEvent = async (userId, id) => {
     where: { id: eventId }
   });
 };
+
+exports.getAllCategories = async (query = {}) => {
+  const includeInactive = query.include_inactive === 'true' || query.include_inactive === true;
+  const where = includeInactive ? {} : { is_active: true };
+
+  let categories = await prisma.calendarCategory.findMany({
+    where,
+    orderBy: [
+      { sort_order: 'asc' },
+      { name: 'asc' }
+    ]
+  });
+
+  if (categories.length === 0 && !includeInactive) {
+    const defaults = [
+      { name: 'Hearing', color: '#ef4444', sort_order: 1 },
+      { name: 'Meeting', color: '#10b981', sort_order: 2 },
+      { name: 'Deadline', color: '#f59e0b', sort_order: 3 },
+      { name: 'Consultation', color: '#38bdf8', sort_order: 4 },
+      { name: 'Case Review', color: '#8b5cf6', sort_order: 5 },
+      { name: 'Personal', color: '#ec4899', sort_order: 6 }
+    ];
+    await prisma.calendarCategory.createMany({
+      data: defaults
+    });
+    categories = await prisma.calendarCategory.findMany({
+      where,
+      orderBy: [
+        { sort_order: 'asc' },
+        { name: 'asc' }
+      ]
+    });
+  }
+  return categories;
+};
+
+exports.createCategory = async (data) => {
+  if (!data.name?.trim()) throw new Error('Category name is required');
+  if (!data.color?.trim()) throw new Error('Category color is required');
+  
+  return await prisma.calendarCategory.create({
+    data: {
+      name: data.name.trim(),
+      color: data.color.trim(),
+      is_active: data.is_active !== undefined ? !!data.is_active : true,
+      sort_order: data.sort_order !== undefined ? parseInt(data.sort_order, 10) : 0
+    }
+  });
+};
+
+exports.updateCategory = async (id, data) => {
+  const updateData = {};
+  if (data.name !== undefined) updateData.name = data.name.trim();
+  if (data.color !== undefined) updateData.color = data.color.trim();
+  if (data.is_active !== undefined) updateData.is_active = !!data.is_active;
+  if (data.sort_order !== undefined) updateData.sort_order = parseInt(data.sort_order, 10);
+
+  return await prisma.calendarCategory.update({
+    where: { id: parseInt(id, 10) },
+    data: updateData
+  });
+};
+
+exports.deleteCategory = async (id) => {
+  return await prisma.calendarCategory.delete({
+    where: { id: parseInt(id, 10) }
+  });
+};

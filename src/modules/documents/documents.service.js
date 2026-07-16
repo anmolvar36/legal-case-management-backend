@@ -46,6 +46,9 @@ const getAll = async (query, user) => {
 
   const where = { ...documentScope(user) };
   if (matter_id) where.matter_id = parseInt(matter_id);
+  if (query.client_id) {
+    where.matter = { ...where.matter, client_id: parseInt(query.client_id) };
+  }
   if (visibility) where.visibility = visibility;
 
   return await prisma.document.findMany({

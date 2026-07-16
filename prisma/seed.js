@@ -150,6 +150,36 @@ async function main() {
     }
   }
 
+  // Seed Default Court Form Templates
+  const defaultForms = [
+    { form_number: 'CIV-010', title: 'Application for Complex Case Designation', practice_area: 'Civil Litigation' },
+    { form_number: 'CIV-110', title: 'Request for Dismissal', practice_area: 'Civil Litigation' },
+    { form_number: 'CIV-120', title: 'Notice of Entry of Dismissal', practice_area: 'Civil Litigation' },
+    { form_number: 'CM-010', title: 'Civil Case Cover Sheet', practice_area: 'Civil Litigation' },
+    { form_number: 'CM-110', title: 'Case Management Statement', practice_area: 'Civil Litigation' },
+    { form_number: 'POS-010', title: 'Proof of Service of Summons', practice_area: 'Civil Litigation' },
+    { form_number: 'POS-030', title: 'Proof of Service by First-Class Mail', practice_area: 'Civil Litigation' },
+    { form_number: 'MC-025', title: 'Attachment', practice_area: 'General Practice' },
+    { form_number: 'SUBP-010', title: 'Civil Subpoena Duces Tecum', practice_area: 'Civil Litigation' },
+    { form_number: 'FW-001', title: 'Request to Waive Court Fees', practice_area: 'General Practice' }
+  ];
+
+  for (const form of defaultForms) {
+    const existing = await prisma.courtFormTemplate.findUnique({
+      where: { form_number: form.form_number }
+    });
+    if (!existing) {
+      await prisma.courtFormTemplate.create({
+        data: {
+          form_number: form.form_number,
+          title: form.title,
+          practice_area: form.practice_area,
+          pdf_path: `uploads/templates/${form.form_number}.pdf`
+        }
+      });
+    }
+  }
+
   console.log('Seeding completed!');
 }
 

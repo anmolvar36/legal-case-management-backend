@@ -7,6 +7,11 @@ router.get('/', protect, calendarController.getEvents);
 router.post('/', protect, calendarController.addEvent);
 router.put('/:id/acknowledge', protect, calendarController.acknowledgeEvent);
 
+router.get('/categories', protect, calendarController.getCategories);
+router.post('/categories', protect, calendarController.createCategory);
+router.put('/categories/:id', protect, calendarController.updateCategory);
+router.delete('/categories/:id', protect, calendarController.deleteCategory);
+
 router.get('/outlook/connect', protect, calendarController.connectOutlook);
 router.get('/outlook/callback', calendarController.callbackOutlook);
 router.post('/outlook/disconnect', protect, calendarController.disconnectOutlook);

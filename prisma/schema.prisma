@@ -19,6 +19,7 @@ enum Role {
 enum LeadStatus {
   new
   screening
+  referred
   consultation_set
   retained
   declined
@@ -105,6 +106,7 @@ model User {
   outlook_refresh_token String? @db.Text
   outlook_token_expires DateTime?
   signature             String? @db.Text
+  generated_forms       GeneratedForm[]
 
   @@map("users")
 }
@@ -177,6 +179,9 @@ model Client {
   contact_last_name String?
   business_address  String?
   home_address      String?
+  opposing_party_name   String?
+  opposing_law_firm     String?
+  opposing_counsel_name String?
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
 
@@ -233,6 +238,7 @@ model Matter {
   folders              Folder[]
   trust_transactions   TrustTransaction[]
   tasks                Task[]
+  generated_forms      GeneratedForm[]
 
   @@map("matters")
 }
@@ -751,4 +757,61 @@ model EventAttendee {
   user       User?         @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("event_attendees")
+}
+
+model CalendarCategory {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  color      String
+  is_active  Boolean  @default(true)
+  sort_order Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("calendar_categories")
+}
+
+model CourtFormTemplate {
+  id            Int                @id @default(autoincrement())
+  form_number   String             @unique
+  title         String
+  practice_area String?
+  pdf_path      String?
+  is_active     Boolean            @default(true)
+  created_at    DateTime           @default(now())
+  mappings      CourtFormMapping[]
+  drafts        GeneratedForm[]
+
+  @@map("court_form_templates")
+}
+
+model CourtFormMapping {
+  id                Int               @id @default(autoincrement())
+  template_id       Int
+  pdf_field_name    String
+  system_field_path String
+  created_at        DateTime          @default(now())
+
+  template          CourtFormTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@unique([template_id, pdf_field_name])
+  @@map("court_form_mappings")
+}
+
+model GeneratedForm {
+  id            Int               @id @default(autoincrement())
+  template_id   Int
+  matter_id     Int
+  form_data     Json
+  pdf_file_name String?
+  status        String            @default("draft") // "draft", "filed"
+  created_by    Int
+  created_at    DateTime          @default(now())
+  updated_at    DateTime          @updatedAt
+
+  template      CourtFormTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  matter        Matter            @relation(fields: [matter_id], references: [id], onDelete: Cascade)
+  creator       User              @relation(fields: [created_by], references: [id])
+
+  @@map("generated_forms")
 }

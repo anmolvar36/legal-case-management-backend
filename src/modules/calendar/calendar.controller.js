@@ -97,3 +97,39 @@ exports.deleteEvent = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.getCategories = async (req, res, next) => {
+  try {
+    const data = await calendarService.getAllCategories(req.query);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.createCategory = async (req, res, next) => {
+  try {
+    const data = await calendarService.createCategory(req.body);
+    res.status(201).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateCategory = async (req, res, next) => {
+  try {
+    const data = await calendarService.updateCategory(req.params.id, req.body);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.deleteCategory = async (req, res, next) => {
+  try {
+    await calendarService.deleteCategory(req.params.id);
+    res.status(200).json({ success: true, message: 'Category deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};

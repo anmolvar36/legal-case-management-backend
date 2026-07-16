@@ -312,6 +312,9 @@ const getAll = async (query, user) => {
 
   const where = {};
   if (matter_id) where.matter_id = parseInt(matter_id);
+  if (query.client_id) {
+    where.matter = { ...where.matter, client_id: parseInt(query.client_id) };
+  }
   if (status) where.status = status;
   if (user?.role === 'lawyer') where.matter = { assigned_lawyer_id: user.id };
   if (user?.role === 'client') {
