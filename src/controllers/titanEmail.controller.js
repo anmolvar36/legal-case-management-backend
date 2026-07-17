@@ -108,7 +108,8 @@ const bulkAction = async (req, res) => {
 
 const getFolderCounts = async (req, res) => {
   try {
-    const counts = await titanEmailService.getFolderCounts(req.user.id);
+    const { accountId } = req.query;
+    const counts = await titanEmailService.getFolderCounts(req.user.id, accountId);
     res.json({ success: true, data: counts });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -117,7 +118,8 @@ const getFolderCounts = async (req, res) => {
 
 const getCustomFolders = async (req, res) => {
   try {
-    const folders = await titanEmailService.getCustomFolders(req.user.id);
+    const { accountId } = req.query;
+    const folders = await titanEmailService.getCustomFolders(req.user.id, accountId);
     res.json({ success: true, data: folders });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
