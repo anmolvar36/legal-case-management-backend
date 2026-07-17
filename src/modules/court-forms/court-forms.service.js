@@ -7,6 +7,11 @@ const os = require('os');
 const crypto = require('crypto');
 const { PDFDocument, PDFTextField, PDFCheckBox, StandardFonts } = require('pdf-lib');
 
+const pdfAnalyzer = require('./services/pdfAnalyzer.service');
+const pdfAcroForm = require('./services/pdfAcroForm.service');
+const pdfCoordinate = require('./services/pdfCoordinate.service');
+const pdfXfa = require('./services/pdfXfa.service');
+
 // Prepend local portable qpdf to PATH on Windows if available
 if (process.platform === 'win32') {
   const localQpdfBin = path.join(process.cwd(), 'scratch', 'qpdf', 'qpdf-12.3.2-msvc64', 'bin');
@@ -158,7 +163,7 @@ exports.getTemplates = async (query = {}) => {
 exports.getTemplateById = async (id) => {
   return prisma.courtFormTemplate.findUnique({
     where: { id: parseInt(id) },
-    include: { mappings: true },
+    include: { mappings: true, field_mappings: true },
   });
 };
 
@@ -315,7 +320,7 @@ exports.generatePdf = async (draftIdRaw) => {
   const form = await prisma.generatedForm.findUnique({
     where: { id: draftId },
     include: {
-      template: { include: { mappings: true } },
+      template: { include: { mappings: true, field_mappings: true } },
       matter: true,
     },
   });
@@ -333,8 +338,6 @@ exports.generatePdf = async (draftIdRaw) => {
   const templatesDirectory = path.resolve(process.cwd(), 'uploads', 'templates');
   const fallbackDirectory = path.resolve(process.cwd(), 'src', 'modules', 'court-forms', 'templates');
   const pdfAbsolutePath = path.resolve(process.cwd(), template.pdf_path);
-
-  console.log(`[PDF_GENERATION]\nTemplates directory: ${templatesDirectory}\nPDF path from database: ${template.pdf_path}\nResolved PDF path: ${pdfAbsolutePath}`);
 
   const isInUploads = pdfAbsolutePath.startsWith(`${templatesDirectory}${path.sep}`) || pdfAbsolutePath === templatesDirectory;
   const isInFallback = pdfAbsolutePath.startsWith(`${fallbackDirectory}${path.sep}`) || pdfAbsolutePath === fallbackDirectory;
@@ -355,61 +358,26 @@ exports.generatePdf = async (draftIdRaw) => {
     throw new Error('Template file is not a valid PDF document (missing %PDF- header)');
   }
 
-  const pdfDoc = await loadRepairablePdf(existingPdfBytes);
-  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  
-  // Draw overlays on template pages using coordinate mappings
-  const pages = pdfDoc.getPages();
-  for (const mapping of template.mappings) {
-    let coords = null;
-    try {
-      coords = JSON.parse(mapping.pdf_field_name);
-    } catch (jsonErr) {
-      console.warn('[PDF_GENERATION] Skipping non-coordinate mapping entry:', mapping.pdf_field_name);
-      continue;
-    }
+  // 1. Analyze PDF Type
+  const analysis = await pdfAnalyzer.analyzePdf(existingPdfBytes);
+  console.log(`[PDF_GENERATION] Analyzed PDF template type: ${analysis.type}`);
 
-    if (!coords || typeof coords.page !== 'number') {
-      continue;
-    }
+  let pdfBytes = null;
 
-    const pageIndex = coords.page;
-    if (pageIndex < 0 || pageIndex >= pages.length) {
-      console.warn(`[PDF_GENERATION] Page index ${pageIndex} is out of bounds (total pages: ${pages.length})`);
-      continue;
-    }
-
-    const page = pages[pageIndex];
-    const systemKey = mapping.system_field_path;
-    let value = systemKey ? (formData[systemKey] || '') : '';
-
-    if (value !== undefined && value !== null && value !== '') {
-      // Coordinate Y axis in pdf-lib is from bottom-up.
-      // If the coordinates stored on frontend are top-down (relative to page height),
-      // we can adjust them or draw directly. Let's draw at the parsed coords.
-      const x = parseFloat(coords.x) || 0;
-      const y = parseFloat(coords.y) || 0;
-      const fontSize = parseFloat(coords.fs) || 10;
-
-      const lowerVal = String(value).toLowerCase();
-      const isCheckboxChecked = value === true || lowerVal === 'true' || lowerVal === 'yes' || lowerVal === '1' || lowerVal === 'on';
-
-      if (isCheckboxChecked) {
-        page.drawText('X', {
-          x,
-          y,
-          size: fontSize,
-          font: helveticaFont
-        });
-      } else if (typeof value !== 'boolean') {
-        page.drawText(String(value), {
-          x,
-          y,
-          size: fontSize,
-          font: helveticaFont
-        });
+  if (analysis.type === 'XFA') {
+    const xfaDetails = await pdfXfa.processXfa(existingPdfBytes);
+    throw new Error(xfaDetails.message);
+  } else if (analysis.type === 'ACROFORM') {
+    const fieldValuesMap = {};
+    for (const mapping of template.mappings) {
+      if (mapping.pdf_field_name && mapping.system_field_path) {
+        fieldValuesMap[mapping.pdf_field_name] = formData[mapping.system_field_path] || '';
       }
     }
+    pdfBytes = await pdfAcroForm.fillFields(existingPdfBytes, fieldValuesMap);
+  } else {
+    // FLAT or fall back to coordinate mapping
+    pdfBytes = await pdfCoordinate.fillCoordinates(existingPdfBytes, template.field_mappings, formData);
   }
 
   const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
@@ -421,41 +389,100 @@ exports.generatePdf = async (draftIdRaw) => {
   const fileName = `${sanitizedFormNumber}_matter-${form.matter_id}_${Date.now()}.pdf`;
   const outputPath = path.join(generatedDir, fileName);
 
-  const pdfBytes = await pdfDoc.save({
-    useObjectStreams: false,
-    addDefaultPage: false,
-    objectsPerTick: 20
-  });
-
   await fs.writeFile(outputPath, pdfBytes);
   console.log('[PDF_GENERATION] PDF file written successfully:', outputPath);
 
+  // Update draft form status
   await prisma.generatedForm.update({
     where: { id: draftId },
     data: { pdf_file_name: fileName, status: 'completed' },
   });
+
+  const relativeOutputPath = path.join('uploads', 'generated', fileName);
+
+  // Save generated document into Matter Documents
+  try {
+    await prisma.document.create({
+      data: {
+        file_name: fileName,
+        original_name: `${template.form_number}_${template.title}.pdf`,
+        mime_type: 'application/pdf',
+        file_path: relativeOutputPath,
+        file_size: pdfBytes.length,
+        matter_id: form.matter_id,
+        uploaded_by_user_id: form.created_by,
+        folder_path: 'Court Forms'
+      }
+    });
+
+    await prisma.activity.create({
+      data: {
+        matter_id: form.matter_id,
+        entity_type: 'document',
+        action: 'generated',
+        description: `Court form generated: ${fileName}`,
+        actor_user_id: form.created_by,
+      }
+    });
+  } catch (dbErr) {
+    console.error('[PDF_GENERATION] Failed to create document / activity entry:', dbErr.message);
+  }
 
   return { fileName, filePath: outputPath, pdfBytes };
 };
 
 // ── MAPPINGS (Admin) ─────────────────────────────────────────
 exports.saveMappings = async (templateId, mappings) => {
-  await prisma.courtFormMapping.deleteMany({ where: { template_id: parseInt(templateId) } });
-  const seenPdfFieldNames = new Set();
-  const uniqueMappings = [];
+  const tId = parseInt(templateId, 10);
+  
+  await prisma.courtFormFieldMapping.deleteMany({ where: { template_id: tId } });
+  await prisma.courtFormMapping.deleteMany({ where: { template_id: tId } });
+
+  const uniqueCoordinates = [];
+  const uniqueMappingsLegacy = [];
+
   for (const m of mappings) {
-    const dbFieldName = m.pdf_field_name.length > 190 ? m.pdf_field_name.substring(0, 190) : m.pdf_field_name;
-    if (seenPdfFieldNames.has(dbFieldName)) continue;
-    seenPdfFieldNames.add(dbFieldName);
-    uniqueMappings.push({
-      template_id: parseInt(templateId),
-      pdf_field_name: dbFieldName,
-      system_field_path: m.system_field_path || '',
+    let coords = null;
+    try {
+      coords = JSON.parse(m.pdf_field_name);
+    } catch (_) {}
+
+    if (coords && typeof coords.page === 'number') {
+      uniqueCoordinates.push({
+        template_id: tId,
+        field_name: coords.lbl || m.system_field_path || 'Unnamed Field',
+        page_number: parseInt(coords.page, 10),
+        x_position: parseFloat(coords.x) || 0,
+        y_position: parseFloat(coords.y) || 0,
+        font_size: parseFloat(coords.fs) || 10,
+        system_field_path: m.system_field_path || '',
+      });
+
+      uniqueMappingsLegacy.push({
+        template_id: tId,
+        pdf_field_name: m.pdf_field_name,
+        system_field_path: m.system_field_path || '',
+      });
+    } else {
+      uniqueMappingsLegacy.push({
+        template_id: tId,
+        pdf_field_name: m.pdf_field_name,
+        system_field_path: m.system_field_path || '',
+      });
+    }
+  }
+
+  if (uniqueCoordinates.length > 0) {
+    await prisma.courtFormFieldMapping.createMany({
+      data: uniqueCoordinates
     });
   }
-  return prisma.courtFormMapping.createMany({
-    data: uniqueMappings
-  });
+
+  if (uniqueMappingsLegacy.length > 0) {
+    await prisma.courtFormMapping.createMany({
+      data: uniqueMappingsLegacy
+    });
+  }
 };
 
 function autoMapFieldName(fieldName) {
@@ -610,3 +637,34 @@ exports.deleteTemplate = async (id) => {
     where: { id: templateId }
   });
 };
+
+// ── MIGRATION / CLEANUP LOGIC ────────────────────────────────
+async function cleanupInvalidMappings() {
+  try {
+    console.log('[COURT_FORMS_MIGRATION] Running automated cleanup of invalid/corrupt mappings...');
+    const allMappings = await prisma.courtFormMapping.findMany();
+    let deleteCount = 0;
+    
+    for (const m of allMappings) {
+      const hasCorrupt = /[\u0000-\u001F\u007F-\u009F]/.test(m.pdf_field_name) ||
+                         m.pdf_field_name.includes('·') ||
+                         m.pdf_field_name.includes('Ý') ||
+                         m.pdf_field_name.includes('æ') ||
+                         m.pdf_field_name.includes('Ë') ||
+                         m.pdf_field_name.includes('ß');
+
+      if (hasCorrupt) {
+        await prisma.courtFormMapping.delete({ where: { id: m.id } });
+        deleteCount++;
+      }
+    }
+    if (deleteCount > 0) {
+      console.log(`[COURT_FORMS_MIGRATION] Cleared ${deleteCount} corrupted mappings.`);
+    }
+  } catch (err) {
+    console.error('[COURT_FORMS_MIGRATION] Migration cleanup failed:', err.message);
+  }
+}
+
+// Trigger automatically on load
+cleanupInvalidMappings();

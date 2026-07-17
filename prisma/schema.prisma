@@ -815,14 +815,15 @@ model CalendarCategory {
 }
 
 model CourtFormTemplate {
-  id            Int                @id @default(autoincrement())
-  form_number   String             @unique
+  id            Int                     @id @default(autoincrement())
+  form_number   String                  @unique
   title         String
   practice_area String?
   pdf_path      String?
-  is_active     Boolean            @default(true)
-  created_at    DateTime           @default(now())
+  is_active     Boolean                 @default(true)
+  created_at    DateTime                @default(now())
   mappings      CourtFormMapping[]
+  field_mappings CourtFormFieldMapping[] @relation("FieldMappings")
   drafts        GeneratedForm[]
 
   @@map("court_form_templates")
@@ -839,6 +840,23 @@ model CourtFormMapping {
 
   @@unique([template_id, pdf_field_name])
   @@map("court_form_mappings")
+}
+
+model CourtFormFieldMapping {
+  id                Int               @id @default(autoincrement())
+  template_id       Int
+  field_name        String
+  page_number       Int
+  x_position        Float
+  y_position        Float
+  font_size         Float             @default(10)
+  system_field_path String
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @updatedAt
+
+  template          CourtFormTemplate @relation("FieldMappings", fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@map("court_form_field_mappings")
 }
 
 model GeneratedForm {
