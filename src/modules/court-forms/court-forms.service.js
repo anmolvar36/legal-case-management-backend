@@ -197,62 +197,66 @@ exports.generatePdf = async (draftId) => {
   if (!fs.existsSync(generatedDir)) fs.mkdirSync(generatedDir, { recursive: true });
 
   let pdfDoc;
-  const masterPath = template.pdf_path
+  let masterPath = template.pdf_path
     ? path.join(process.cwd(), template.pdf_path)
     : null;
 
-  if (masterPath && fs.existsSync(masterPath)) {
-    // Load the real Judicial Council PDF and fill it
-    const existingPdfBytes = fs.readFileSync(masterPath);
-    pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
-    
-    let pdfForm = null;
     try {
-      pdfForm = pdfDoc.getForm();
-    } catch (e) {
-      console.warn('PDF does not contain interactive form fields');
-    }
+      const existingPdfBytes = fs.readFileSync(masterPath);
+      pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
+      
+      let pdfForm = null;
+      try {
+        pdfForm = pdfDoc.getForm();
+      } catch (e) {
+        console.warn('PDF does not contain interactive form fields');
+      }
 
-    const { PDFTextField, PDFCheckBox, StandardFonts } = require('pdf-lib');
-    const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const { PDFTextField, PDFCheckBox, StandardFonts } = require('pdf-lib');
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-    if (pdfForm) {
-      const fields = pdfForm.getFields();
-      for (const field of fields) {
-        const fieldName = field.getName();
-        const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
-        const systemKey = mapping ? mapping.system_field_path : fieldName;
-        const value = formData[systemKey] || formData[fieldName] || '';
+      if (pdfForm) {
+        const fields = pdfForm.getFields();
+        for (const field of fields) {
+          const fieldName = field.getName();
+          const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
+          const systemKey = mapping ? mapping.system_field_path : fieldName;
+          const value = formData[systemKey] || formData[fieldName] || '';
 
-        try {
-          if (field instanceof PDFTextField) {
-            try {
-              field.setText(String(value));
-            } catch (err) {
-              console.warn(`Bypassed field.setText crash for ${fieldName}:`, err.message);
-              // Fallback safe fill method if normal fails
+          try {
+            if (field instanceof PDFTextField) {
               try {
-                field.acroField.setValue(String(value));
-              } catch (_) {}
+                field.setText(String(value));
+              } catch (err) {
+                console.warn(`Bypassed field.setText crash for ${fieldName}:`, err.message);
+                try {
+                  field.acroField.setValue(String(value));
+                } catch (_) {}
+              }
+            } else if (field instanceof PDFCheckBox) {
+              if (value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes')) {
+                field.check();
+              } else {
+                field.uncheck();
+              }
             }
-          } else if (field instanceof PDFCheckBox) {
-            if (value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes')) {
-              field.check();
-            } else {
-              field.uncheck();
-            }
+          } catch (err) {
+            console.warn(`Failed to set field ${fieldName}:`, err.message);
           }
+        }
+        try {
+          pdfForm.flatten();
         } catch (err) {
-          console.warn(`Failed to set field ${fieldName}:`, err.message);
+          console.warn('Failed to flatten PDF form:', err.message);
         }
       }
-      try {
-        pdfForm.flatten();
-      } catch (err) {
-        console.warn('Failed to flatten PDF form:', err.message);
-      }
+    } catch (crashError) {
+      console.error('Bypassed top-level PDFDict crash. Triggering graceful flat PDF fallback:', crashError.message);
+      masterPath = null; // Forces execution to fall back to the safe document builder block below
     }
-  } else {
+  }
+
+  if (!masterPath) {
     // No master PDF uploaded yet — create a clean informational PDF
     pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage([612, 792]);
