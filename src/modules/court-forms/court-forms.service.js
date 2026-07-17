@@ -235,12 +235,46 @@ exports.generatePdf = async (draftId) => {
         for (const field of fields) {
           const fieldName = field.getName();
           const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
-          const systemKey = mapping ? mapping.system_field_path : fieldName;
-          const value = formData[systemKey] || formData[fieldName] || '';
+          const systemKey = mapping ? mapping.system_field_path : null;
+          
+          // Value resolution path:
+          // 1. Try system mapping
+          // 2. Try direct matching by pdf field name keywords
+          let value = '';
+          if (systemKey) {
+            value = formData[systemKey] || '';
+          }
+          
+          if (!value) {
+            const lowerFieldName = fieldName.toLowerCase();
+            // Match main system keys dynamically
+            if (lowerFieldName.includes('casenumber') || lowerFieldName.includes('case_number') || (lowerFieldName.includes('case') && lowerFieldName.includes('no'))) {
+              value = formData['case_number'];
+            } else if (lowerFieldName.includes('casetitle') || lowerFieldName.includes('casename')) {
+              value = formData['case_title'];
+            } else if (lowerFieldName.includes('attypartyinfo') && lowerFieldName.includes('name')) {
+              value = formData['attorney_name'];
+            } else if (lowerFieldName.includes('attyfirm') || lowerFieldName.includes('firmname')) {
+              value = formData['firm_name'];
+            } else if (lowerFieldName.includes('plaintiff') || lowerFieldName.includes('petitioner')) {
+              value = formData['plaintiff'];
+            } else if (lowerFieldName.includes('defendant') || lowerFieldName.includes('respondent')) {
+              value = formData['defendant'];
+            } else if (lowerFieldName.includes('courtname') || lowerFieldName.includes('superiorcourt')) {
+              value = formData['court_name'];
+            } else if (lowerFieldName.includes('courtaddress')) {
+              value = formData['court_address'];
+            } else {
+              // Try direct key match from custom fields
+              const cleanKey = getCleanFieldName(fieldName);
+              value = formData[cleanKey] || formData[fieldName] || '';
+            }
+          }
+
           try {
             if (field instanceof PDFTextField) {
               try {
-                console.log(`>>> Setting text on ${fieldName} with value: "${value}"`);
+                console.log(`>>> Auto-Filling text field: ${fieldName} -> "${value}"`);
                 field.setText(String(value));
               } catch (err) {
                 console.warn(`>>> Bypassed field.setText crash for ${fieldName}:`, err.message);
@@ -249,8 +283,9 @@ exports.generatePdf = async (draftId) => {
                 } catch (_) {}
               }
             } else if (field instanceof PDFCheckBox) {
-              if (value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes')) {
-                console.log(`>>> Checking checkbox ${fieldName}`);
+              const isChecked = value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes');
+              if (isChecked) {
+                console.log(`>>> Auto-Checking checkbox: ${fieldName}`);
                 field.check();
               } else {
                 field.uncheck();
