@@ -213,7 +213,8 @@ exports.generatePdf = async (draftId) => {
       console.warn('PDF does not contain interactive form fields');
     }
 
-    const { PDFTextField, PDFCheckBox } = require('pdf-lib');
+    const { PDFTextField, PDFCheckBox, StandardFonts } = require('pdf-lib');
+    const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
     if (pdfForm) {
       const fields = pdfForm.getFields();
@@ -225,7 +226,12 @@ exports.generatePdf = async (draftId) => {
 
         try {
           if (field instanceof PDFTextField) {
+            // Safely set text and fallback to font to prevent PDFDict/undefined errors
             field.setText(String(value));
+            // Force default font to Helvetica to avoid missing layout dicts
+            try {
+              field.updateAppearances(helveticaFont);
+            } catch (_) {}
           } else if (field instanceof PDFCheckBox) {
             if (value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes')) {
               field.check();
