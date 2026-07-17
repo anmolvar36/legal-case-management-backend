@@ -213,25 +213,35 @@ exports.generatePdf = async (draftId) => {
       console.warn('PDF does not contain interactive form fields');
     }
 
+    const { PDFTextField, PDFCheckBox } = require('pdf-lib');
+
     if (pdfForm) {
       const fields = pdfForm.getFields();
-      // Use saved mappings, or fill by matching field names directly
       for (const field of fields) {
         const fieldName = field.getName();
-        // Check if there is an explicit mapping
         const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
         const systemKey = mapping ? mapping.system_field_path : fieldName;
         const value = formData[systemKey] || formData[fieldName] || '';
 
         try {
-          if (field.constructor.name === 'PDFTextField') {
+          if (field instanceof PDFTextField) {
             field.setText(String(value));
-          } else if (field.constructor.name === 'PDFCheckBox' && value) {
-            field.check();
+          } else if (field instanceof PDFCheckBox) {
+            if (value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes')) {
+              field.check();
+            } else {
+              field.uncheck();
+            }
           }
-        } catch (_) { /* skip unrecognised fields */ }
+        } catch (err) {
+          console.warn(`Failed to set field ${fieldName}:`, err.message);
+        }
       }
-      pdfForm.flatten();
+      try {
+        pdfForm.flatten();
+      } catch (err) {
+        console.warn('Failed to flatten PDF form:', err.message);
+      }
     }
   } else {
     // No master PDF uploaded yet — create a clean informational PDF
