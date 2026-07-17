@@ -314,10 +314,27 @@ exports.uploadTemplate = async (metaData, file) => {
     throw new Error('Invalid fillable PDF template structure');
   }
 
+  // Check if form_number already exists, if so delete the old one first to overwrite it!
+  const normFormNum = form_number.trim().toUpperCase();
+  const existingForm = await prisma.courtFormTemplate.findUnique({
+    where: { form_number: normFormNum }
+  });
+  if (existingForm) {
+    // 1. Delete physical file
+    const oldPdfPath = path.join(process.cwd(), existingForm.pdf_path);
+    if (fs.existsSync(oldPdfPath)) {
+      try { fs.unlinkSync(oldPdfPath); } catch (e) { console.error('Failed to delete old pdf:', e); }
+    }
+    // 2. Delete database record
+    await prisma.courtFormTemplate.delete({
+      where: { id: existingForm.id }
+    });
+  }
+
   // Create template record in db
   const template = await prisma.courtFormTemplate.create({
     data: {
-      form_number: form_number.trim().toUpperCase(),
+      form_number: normFormNum,
       title: title.trim(),
       practice_area: practice_area ? practice_area.trim() : null,
       pdf_path: relativePdfPath,
