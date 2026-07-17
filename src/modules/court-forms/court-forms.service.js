@@ -226,12 +226,15 @@ exports.generatePdf = async (draftId) => {
 
         try {
           if (field instanceof PDFTextField) {
-            // Safely set text and fallback to font to prevent PDFDict/undefined errors
-            field.setText(String(value));
-            // Force default font to Helvetica to avoid missing layout dicts
             try {
-              field.updateAppearances(helveticaFont);
-            } catch (_) {}
+              field.setText(String(value));
+            } catch (err) {
+              console.warn(`Bypassed field.setText crash for ${fieldName}:`, err.message);
+              // Fallback safe fill method if normal fails
+              try {
+                field.acroField.setValue(String(value));
+              } catch (_) {}
+            }
           } else if (field instanceof PDFCheckBox) {
             if (value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes')) {
               field.check();
