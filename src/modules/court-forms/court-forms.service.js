@@ -272,7 +272,60 @@ exports.saveMappings = async (templateId, mappings) => {
     data: mappings.map((m) => ({
       template_id: parseInt(templateId),
       pdf_field_name: m.pdf_field_name,
-      system_field_path: m.system_field_path,
+      system_field_path: m.system_field_path || '',
     })),
   });
+};
+
+exports.uploadTemplate = async (metaData, file) => {
+  const { form_number, title, practice_area } = metaData;
+  if (!form_number || !title) throw new Error('Form number and title are required');
+  if (!file) throw new Error('PDF file is required');
+
+  const templatesDir = path.join(process.cwd(), 'uploads', 'templates');
+  if (!fs.existsSync(templatesDir)) fs.mkdirSync(templatesDir, { recursive: true });
+
+  const destinationFileName = `${form_number.trim().toUpperCase()}_${Date.now()}.pdf`;
+  const relativePdfPath = path.join('uploads', 'templates', destinationFileName);
+  const absolutePdfPath = path.join(process.cwd(), relativePdfPath);
+
+  // Write file to templates folder
+  fs.writeFileSync(absolutePdfPath, file.buffer);
+
+  // Load and parse PDF using pdf-lib
+  let pdfFieldNames = [];
+  try {
+    const pdfDoc = await PDFDocument.load(file.buffer);
+    const pdfForm = pdfDoc.getForm();
+    const pdfFields = pdfForm.getFields();
+    pdfFieldNames = pdfFields.map(f => f.getName());
+  } catch (err) {
+    console.error('Failed parsing PDF form fields:', err);
+    // Remove the file if parsing failed
+    if (fs.existsSync(absolutePdfPath)) fs.unlinkSync(absolutePdfPath);
+    throw new Error('Invalid fillable PDF template structure');
+  }
+
+  // Create template record in db
+  const template = await prisma.courtFormTemplate.create({
+    data: {
+      form_number: form_number.trim().toUpperCase(),
+      title: title.trim(),
+      practice_area: practice_area ? practice_area.trim() : null,
+      pdf_path: relativePdfPath,
+    }
+  });
+
+  // Pre-seed empty mapping records for the parsed field names
+  if (pdfFieldNames.length > 0) {
+    await prisma.courtFormMapping.createMany({
+      data: pdfFieldNames.map(fieldName => ({
+        template_id: template.id,
+        pdf_field_name: fieldName,
+        system_field_path: ''
+      }))
+    });
+  }
+
+  return this.getTemplateById(template.id);
 };

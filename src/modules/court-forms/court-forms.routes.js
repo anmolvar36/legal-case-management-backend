@@ -5,8 +5,12 @@ const { protect } = require('../../middlewares/auth.middleware');
 
 router.use(protect);
 
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+
 // Template Library
 router.get('/templates', controller.getTemplates);
+router.post('/templates/upload', upload.single('file'), controller.uploadTemplate);
 router.get('/templates/:id', controller.getTemplateById);
 router.post('/templates/:id/mappings', controller.saveMappings);
 

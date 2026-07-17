@@ -109,3 +109,13 @@ exports.saveMappings = async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 };
+
+// POST /api/court-forms/templates/upload
+exports.uploadTemplate = async (req, res) => {
+  try {
+    const template = await courtFormsService.uploadTemplate(req.body, req.file);
+    res.status(201).json({ data: template });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+};
