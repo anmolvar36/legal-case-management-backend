@@ -173,26 +173,34 @@ exports.generatePdf = async (draftId) => {
     // Load the real Judicial Council PDF and fill it
     const existingPdfBytes = fs.readFileSync(masterPath);
     pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
-    const pdfForm = pdfDoc.getForm();
-    const fields = pdfForm.getFields();
-
-    // Use saved mappings, or fill by matching field names directly
-    for (const field of fields) {
-      const fieldName = field.getName();
-      // Check if there is an explicit mapping
-      const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
-      const systemKey = mapping ? mapping.system_field_path : fieldName;
-      const value = formData[systemKey] || formData[fieldName] || '';
-
-      try {
-        if (field.constructor.name === 'PDFTextField') {
-          field.setText(String(value));
-        } else if (field.constructor.name === 'PDFCheckBox' && value) {
-          field.check();
-        }
-      } catch (_) { /* skip unrecognised fields */ }
+    
+    let pdfForm = null;
+    try {
+      pdfForm = pdfDoc.getForm();
+    } catch (e) {
+      console.warn('PDF does not contain interactive form fields');
     }
-    pdfForm.flatten();
+
+    if (pdfForm) {
+      const fields = pdfForm.getFields();
+      // Use saved mappings, or fill by matching field names directly
+      for (const field of fields) {
+        const fieldName = field.getName();
+        // Check if there is an explicit mapping
+        const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
+        const systemKey = mapping ? mapping.system_field_path : fieldName;
+        const value = formData[systemKey] || formData[fieldName] || '';
+
+        try {
+          if (field.constructor.name === 'PDFTextField') {
+            field.setText(String(value));
+          } else if (field.constructor.name === 'PDFCheckBox' && value) {
+            field.check();
+          }
+        } catch (_) { /* skip unrecognised fields */ }
+      }
+      pdfForm.flatten();
+    }
   } else {
     // No master PDF uploaded yet — create a clean informational PDF
     pdfDoc = await PDFDocument.create();
