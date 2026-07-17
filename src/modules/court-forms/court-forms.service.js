@@ -261,100 +261,106 @@ exports.generatePdf = async (draftId) => {
             console.warn(`>>> Failed to set field ${fieldName}:`, err.message);
           }
         }
-        try {
-          console.log('>>> Flattening PDF Form...');
-          pdfForm.flatten();
-          console.log('>>> Flattening completed successfully.');
-        } catch (err) {
-          console.warn('>>> Failed to flatten PDF form:', err.message);
-        }
+      try {
+        console.log('>>> Flattening PDF Form...');
+        pdfForm.flatten();
+        console.log('>>> Flattening completed successfully.');
+      } catch (err) {
+        console.warn('>>> Failed to flatten PDF form:', err.message);
       }
-    } catch (crashError) {
-      console.error('>>> CRITICAL ERROR IN PDF-LIB WORKER (BYPASSING TO FALLBACK):', crashError.message, crashError.stack);
-      masterPath = null;
     }
-  } else {
-    console.log('>>> File does not exist at masterPath. Forcing informational PDF fallback.');
+
+    console.log('>>> Saving PDF document bytes inside try block...');
+    let pdfBytes;
+    try {
+      pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
+      console.log('>>> PDF bytes saved successfully. Length:', pdfBytes.length);
+    } catch (saveError) {
+      console.error('>>> CRITICAL ERROR SAVING PDF DOCUMENT (FALLBACK TO BASIC SAVE):', saveError.message);
+      pdfBytes = await pdfDoc.save();
+    }
+
+    const fileName = `${template.form_number}_matter-${form.matter_id}_${Date.now()}.pdf`;
+    const outputPath = path.join(generatedDir, fileName);
+    fs.writeFileSync(outputPath, pdfBytes);
+    console.log('>>> PDF file written to output path:', outputPath);
+
+    await prisma.generatedForm.update({
+      where: { id: parseInt(draftId) },
+      data: { pdf_file_name: fileName, status: 'completed' },
+    });
+
+    return { fileName, filePath: outputPath, pdfBytes };
+
+  } catch (crashError) {
+    console.error('>>> CRITICAL ERROR IN PDF-LIB WORKER (BYPASSING TO FALLBACK):', crashError.message, crashError.stack);
     masterPath = null;
   }
 
-  if (!masterPath) {
-    console.log('>>> Running informational fallback PDF creation...');
-    try {
-      pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([612, 792]);
-      const { height } = page.getSize();
-      const { StandardFonts } = require('pdf-lib');
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  // Running informational fallback PDF creation if masterPath was reset or file reading failed
+  console.log('>>> Running informational fallback PDF creation...');
+  try {
+    pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([612, 792]);
+    const { height } = page.getSize();
+    const { StandardFonts } = require('pdf-lib');
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-      page.drawText(`${template.form_number} — ${template.title}`, {
-        x: 50, y: height - 60, size: 16, font: boldFont,
-      });
-      page.drawText('CALIFORNIA JUDICIAL COUNCIL FORM', {
-        x: 50, y: height - 80, size: 10, font,
-      });
+    page.drawText(`${template.form_number} — ${template.title}`, {
+      x: 50, y: height - 60, size: 16, font: boldFont,
+    });
+    page.drawText('CALIFORNIA JUDICIAL COUNCIL FORM', {
+      x: 50, y: height - 80, size: 10, font,
+    });
 
-      page.drawLine({ start: { x: 50, y: height - 95 }, end: { x: 562, y: height - 95 }, thickness: 1 });
+    page.drawLine({ start: { x: 50, y: height - 95 }, end: { x: 562, y: height - 95 }, thickness: 1 });
 
-      let y = height - 120;
-      const sections = [
-        { label: 'Case Title', key: 'case_title' },
-        { label: 'Case Number', key: 'case_number' },
-        { label: 'Court', key: 'court_name' },
-        { label: 'Judge', key: 'judge_name' },
-        { label: 'Attorney', key: 'attorney_name' },
-        { label: 'Firm', key: 'firm_name' },
-        { label: 'Plaintiff / Client', key: 'client_name' },
-        { label: 'Defendant', key: 'defendant' },
-        { label: 'Filing Date', key: 'filing_date' },
-        { label: 'Hearing Date', key: 'hearing_date' },
-      ];
+    let y = height - 120;
+    const sections = [
+      { label: 'Case Title', key: 'case_title' },
+      { label: 'Case Number', key: 'case_number' },
+      { label: 'Court', key: 'court_name' },
+      { label: 'Judge', key: 'judge_name' },
+      { label: 'Attorney', key: 'attorney_name' },
+      { label: 'Firm', key: 'firm_name' },
+      { label: 'Plaintiff / Client', key: 'client_name' },
+      { label: 'Defendant', key: 'defendant' },
+      { label: 'Filing Date', key: 'filing_date' },
+      { label: 'Hearing Date', key: 'hearing_date' },
+    ];
 
-      for (const section of sections) {
-        const val = formData[section.key] || '';
-        page.drawText(`${section.label}:`, { x: 50, y, size: 10, font: boldFont });
-        page.drawText(val, { x: 200, y, size: 10, font });
-        y -= 22;
-        if (y < 80) break;
-      }
-
-      const knownKeys = new Set(sections.map(s => s.key));
-      for (const [key, value] of Object.entries(formData)) {
-        if (knownKeys.has(key) || !value) continue;
-        const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        page.drawText(`${label}:`, { x: 50, y, size: 10, font: boldFont });
-        page.drawText(String(value), { x: 200, y, size: 10, font });
-        y -= 22;
-        if (y < 80) break;
-      }
-
-      page.drawText(`Generated: ${new Date().toLocaleString()}`, {
-        x: 50, y: 40, size: 8, font,
-      });
-      console.log('>>> Fallback PDF created successfully.');
-    } catch (fallbackError) {
-      console.error('>>> CRITICAL SYSTEM CRASH IN FALLBACK PDF BUILDER:', fallbackError.message, fallbackError.stack);
-      throw fallbackError;
+    for (const section of sections) {
+      const val = formData[section.key] || '';
+      page.drawText(`${section.label}:`, { x: 50, y, size: 10, font: boldFont });
+      page.drawText(val, { x: 200, y, size: 10, font });
+      y -= 22;
+      if (y < 80) break;
     }
+
+    const knownKeys = new Set(sections.map(s => s.key));
+    for (const [key, value] of Object.entries(formData)) {
+      if (knownKeys.has(key) || !value) continue;
+      const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      page.drawText(`${label}:`, { x: 50, y, size: 10, font: boldFont });
+      page.drawText(String(value), { x: 200, y, size: 10, font });
+      y -= 22;
+      if (y < 80) break;
+    }
+
+    page.drawText(`Generated: ${new Date().toLocaleString()}`, {
+      x: 50, y: 40, size: 8, font,
+    });
+    console.log('>>> Fallback PDF created successfully.');
+  } catch (fallbackError) {
+    console.error('>>> CRITICAL SYSTEM CRASH IN FALLBACK PDF BUILDER:', fallbackError.message, fallbackError.stack);
+    throw fallbackError;
   }
 
   const fileName = `${template.form_number}_matter-${form.matter_id}_${Date.now()}.pdf`;
   const outputPath = path.join(generatedDir, fileName);
-  
-  console.log('>>> Saving PDF document bytes...');
-  let pdfBytes;
-  try {
-    pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
-    console.log('>>> PDF bytes saved successfully. Length:', pdfBytes.length);
-  } catch (saveError) {
-    console.error('>>> CRITICAL ERROR SAVING PDF DOCUMENT (FALLBACK TO BASIC SAVE):', saveError.message);
-    // If saving with updates fails, try a clean force save
-    pdfBytes = await pdfDoc.save();
-  }
-
+  const pdfBytes = await pdfDoc.save();
   fs.writeFileSync(outputPath, pdfBytes);
-  console.log('>>> PDF file written to output path:', outputPath);
 
   await prisma.generatedForm.update({
     where: { id: parseInt(draftId) },
