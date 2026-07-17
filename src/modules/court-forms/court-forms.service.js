@@ -259,7 +259,7 @@ exports.generatePdf = async (draftId) => {
 
   const fileName = `${template.form_number}_matter-${form.matter_id}_${Date.now()}.pdf`;
   const outputPath = path.join(generatedDir, fileName);
-  const pdfBytes = await pdfDoc.save();
+  const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
   fs.writeFileSync(outputPath, pdfBytes);
 
   // Update draft record
