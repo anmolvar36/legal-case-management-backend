@@ -39,6 +39,7 @@ class TitanEmailProvider {
         sender_user_id: senderUserId,
         sender_role: senderUser?.role || 'lawyer',
         communication_type: 'titan_email',
+        email_account_id: accountId ? parseInt(accountId, 10) : null,
         folder: 'inbox',
         to: userEmail,
         subject,
@@ -558,6 +559,39 @@ class TitanEmailProvider {
     });
 
     return Array.from(customFolders);
+  }
+
+  async getEmailAccounts(userId) {
+    return await prisma.emailAccount.findMany({
+      where: { user_id: userId, provider: 'titan' },
+      orderBy: { created_at: 'desc' }
+    });
+  }
+
+  async addEmailAccount(userId, data) {
+    return await prisma.emailAccount.create({
+      data: {
+        user_id: userId,
+        provider: 'titan',
+        email_address: data.email_address,
+        smtp_host: data.smtp_host || 'smtp.titan.email',
+        smtp_port: data.smtp_port ? parseInt(data.smtp_port, 10) : 465,
+        imap_host: data.imap_host || 'imap.titan.email',
+        imap_port: data.imap_port ? parseInt(data.imap_port, 10) : 993,
+        username: data.username || data.email_address,
+        password: data.password || '',
+        sync_status: 'connected',
+      }
+    });
+  }
+
+  async deleteEmailAccount(userId, accountId) {
+    return await prisma.emailAccount.deleteMany({
+      where: {
+        id: parseInt(accountId, 10),
+        user_id: userId
+      }
+    });
   }
 }
 
