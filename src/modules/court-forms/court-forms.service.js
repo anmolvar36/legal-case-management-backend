@@ -201,6 +201,7 @@ exports.generatePdf = async (draftId) => {
     ? path.join(process.cwd(), template.pdf_path)
     : null;
 
+  if (masterPath) {
     try {
       const existingPdfBytes = fs.readFileSync(masterPath);
       pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
