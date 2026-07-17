@@ -177,8 +177,8 @@ exports.getAllDrafts = async (query = {}) => {
   });
 };
 
-// ── PDF GENERATION ────────────────────────────────────────────
 exports.generatePdf = async (draftId) => {
+  console.log('>>> STARTING PDF GENERATION FOR DRAFT ID:', draftId);
   const form = await prisma.generatedForm.findUnique({
     where: { id: parseInt(draftId) },
     include: {
@@ -186,31 +186,45 @@ exports.generatePdf = async (draftId) => {
       matter: true,
     },
   });
-  if (!form) throw new Error('Form draft not found');
+  if (!form) {
+    console.error('>>> Error: Form draft not found for ID', draftId);
+    throw new Error('Form draft not found');
+  }
 
   const formData = form.form_data;
   const template = form.template;
+  console.log('>>> Draft template:', template.form_number, '| pdf_path:', template.pdf_path);
 
-  // Load master PDF template if it exists on disk, otherwise create a basic PDF
   const uploadDir = path.join(process.cwd(), 'uploads', 'templates');
   const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
-  if (!fs.existsSync(generatedDir)) fs.mkdirSync(generatedDir, { recursive: true });
+  if (!fs.existsSync(generatedDir)) {
+    fs.mkdirSync(generatedDir, { recursive: true });
+    console.log('>>> Created generated directory:', generatedDir);
+  }
 
   let pdfDoc;
   let masterPath = template.pdf_path
     ? path.join(process.cwd(), template.pdf_path)
     : null;
 
-  if (masterPath) {
+  console.log('>>> Calculated template masterPath:', masterPath);
+
+  if (masterPath && fs.existsSync(masterPath)) {
     try {
+      console.log('>>> Attempting to read existing PDF bytes from:', masterPath);
       const existingPdfBytes = fs.readFileSync(masterPath);
+      console.log('>>> PDF Bytes length:', existingPdfBytes.length);
+
+      console.log('>>> Loading PDF bytes into pdf-lib...');
       pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
+      console.log('>>> PDF document loaded successfully with pdf-lib.');
       
       let pdfForm = null;
       try {
         pdfForm = pdfDoc.getForm();
+        console.log('>>> PDF Form fetched. Fields count:', pdfForm.getFields().length);
       } catch (e) {
-        console.warn('PDF does not contain interactive form fields');
+        console.warn('>>> PDF does not contain interactive form fields:', e.message);
       }
 
       const { PDFTextField, PDFCheckBox, StandardFonts } = require('pdf-lib');
@@ -227,99 +241,121 @@ exports.generatePdf = async (draftId) => {
           try {
             if (field instanceof PDFTextField) {
               try {
+                console.log(`>>> Setting text on ${fieldName} with value: "${value}"`);
                 field.setText(String(value));
               } catch (err) {
-                console.warn(`Bypassed field.setText crash for ${fieldName}:`, err.message);
+                console.warn(`>>> Bypassed field.setText crash for ${fieldName}:`, err.message);
                 try {
                   field.acroField.setValue(String(value));
                 } catch (_) {}
               }
             } else if (field instanceof PDFCheckBox) {
               if (value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes')) {
+                console.log(`>>> Checking checkbox ${fieldName}`);
                 field.check();
               } else {
                 field.uncheck();
               }
             }
           } catch (err) {
-            console.warn(`Failed to set field ${fieldName}:`, err.message);
+            console.warn(`>>> Failed to set field ${fieldName}:`, err.message);
           }
         }
         try {
+          console.log('>>> Flattening PDF Form...');
           pdfForm.flatten();
+          console.log('>>> Flattening completed successfully.');
         } catch (err) {
-          console.warn('Failed to flatten PDF form:', err.message);
+          console.warn('>>> Failed to flatten PDF form:', err.message);
         }
       }
     } catch (crashError) {
-      console.error('Bypassed top-level PDFDict crash. Triggering graceful flat PDF fallback:', crashError.message);
-      masterPath = null; // Forces execution to fall back to the safe document builder block below
+      console.error('>>> CRITICAL ERROR IN PDF-LIB WORKER (BYPASSING TO FALLBACK):', crashError.message, crashError.stack);
+      masterPath = null;
     }
+  } else {
+    console.log('>>> File does not exist at masterPath. Forcing informational PDF fallback.');
+    masterPath = null;
   }
 
   if (!masterPath) {
-    // No master PDF uploaded yet — create a clean informational PDF
-    pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([612, 792]);
-    const { height } = page.getSize();
-    const { StandardFonts } = require('pdf-lib');
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    console.log('>>> Running informational fallback PDF creation...');
+    try {
+      pdfDoc = await PDFDocument.create();
+      const page = pdfDoc.addPage([612, 792]);
+      const { height } = page.getSize();
+      const { StandardFonts } = require('pdf-lib');
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    page.drawText(`${template.form_number} — ${template.title}`, {
-      x: 50, y: height - 60, size: 16, font: boldFont,
-    });
-    page.drawText('CALIFORNIA JUDICIAL COUNCIL FORM', {
-      x: 50, y: height - 80, size: 10, font,
-    });
+      page.drawText(`${template.form_number} — ${template.title}`, {
+        x: 50, y: height - 60, size: 16, font: boldFont,
+      });
+      page.drawText('CALIFORNIA JUDICIAL COUNCIL FORM', {
+        x: 50, y: height - 80, size: 10, font,
+      });
 
-    // Draw a divider line
-    page.drawLine({ start: { x: 50, y: height - 95 }, end: { x: 562, y: height - 95 }, thickness: 1 });
+      page.drawLine({ start: { x: 50, y: height - 95 }, end: { x: 562, y: height - 95 }, thickness: 1 });
 
-    let y = height - 120;
-    const sections = [
-      { label: 'Case Title', key: 'case_title' },
-      { label: 'Case Number', key: 'case_number' },
-      { label: 'Court', key: 'court_name' },
-      { label: 'Judge', key: 'judge_name' },
-      { label: 'Attorney', key: 'attorney_name' },
-      { label: 'Firm', key: 'firm_name' },
-      { label: 'Plaintiff / Client', key: 'client_name' },
-      { label: 'Defendant', key: 'defendant' },
-      { label: 'Filing Date', key: 'filing_date' },
-      { label: 'Hearing Date', key: 'hearing_date' },
-    ];
+      let y = height - 120;
+      const sections = [
+        { label: 'Case Title', key: 'case_title' },
+        { label: 'Case Number', key: 'case_number' },
+        { label: 'Court', key: 'court_name' },
+        { label: 'Judge', key: 'judge_name' },
+        { label: 'Attorney', key: 'attorney_name' },
+        { label: 'Firm', key: 'firm_name' },
+        { label: 'Plaintiff / Client', key: 'client_name' },
+        { label: 'Defendant', key: 'defendant' },
+        { label: 'Filing Date', key: 'filing_date' },
+        { label: 'Hearing Date', key: 'hearing_date' },
+      ];
 
-    for (const section of sections) {
-      const val = formData[section.key] || '';
-      page.drawText(`${section.label}:`, { x: 50, y, size: 10, font: boldFont });
-      page.drawText(val, { x: 200, y, size: 10, font });
-      y -= 22;
-      if (y < 80) break;
+      for (const section of sections) {
+        const val = formData[section.key] || '';
+        page.drawText(`${section.label}:`, { x: 50, y, size: 10, font: boldFont });
+        page.drawText(val, { x: 200, y, size: 10, font });
+        y -= 22;
+        if (y < 80) break;
+      }
+
+      const knownKeys = new Set(sections.map(s => s.key));
+      for (const [key, value] of Object.entries(formData)) {
+        if (knownKeys.has(key) || !value) continue;
+        const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        page.drawText(`${label}:`, { x: 50, y, size: 10, font: boldFont });
+        page.drawText(String(value), { x: 200, y, size: 10, font });
+        y -= 22;
+        if (y < 80) break;
+      }
+
+      page.drawText(`Generated: ${new Date().toLocaleString()}`, {
+        x: 50, y: 40, size: 8, font,
+      });
+      console.log('>>> Fallback PDF created successfully.');
+    } catch (fallbackError) {
+      console.error('>>> CRITICAL SYSTEM CRASH IN FALLBACK PDF BUILDER:', fallbackError.message, fallbackError.stack);
+      throw fallbackError;
     }
-
-    // Add remaining custom fields
-    const knownKeys = new Set(sections.map(s => s.key));
-    for (const [key, value] of Object.entries(formData)) {
-      if (knownKeys.has(key) || !value) continue;
-      const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      page.drawText(`${label}:`, { x: 50, y, size: 10, font: boldFont });
-      page.drawText(String(value), { x: 200, y, size: 10, font });
-      y -= 22;
-      if (y < 80) break;
-    }
-
-    page.drawText(`Generated: ${new Date().toLocaleString()}`, {
-      x: 50, y: 40, size: 8, font,
-    });
   }
 
   const fileName = `${template.form_number}_matter-${form.matter_id}_${Date.now()}.pdf`;
   const outputPath = path.join(generatedDir, fileName);
-  const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
-  fs.writeFileSync(outputPath, pdfBytes);
+  
+  console.log('>>> Saving PDF document bytes...');
+  let pdfBytes;
+  try {
+    pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
+    console.log('>>> PDF bytes saved successfully. Length:', pdfBytes.length);
+  } catch (saveError) {
+    console.error('>>> CRITICAL ERROR SAVING PDF DOCUMENT (FALLBACK TO BASIC SAVE):', saveError.message);
+    // If saving with updates fails, try a clean force save
+    pdfBytes = await pdfDoc.save();
+  }
 
-  // Update draft record
+  fs.writeFileSync(outputPath, pdfBytes);
+  console.log('>>> PDF file written to output path:', outputPath);
+
   await prisma.generatedForm.update({
     where: { id: parseInt(draftId) },
     data: { pdf_file_name: fileName, status: 'completed' },
