@@ -177,8 +177,8 @@ exports.getAllDrafts = async (query = {}) => {
   });
 };
 
-// ── PDF GENERATION ────────────────────────────────────────────
 exports.generatePdf = async (draftId) => {
+  console.log('>>> STARTING PDF GENERATION FOR DRAFT ID:', draftId);
   const form = await prisma.generatedForm.findUnique({
     where: { id: parseInt(draftId) },
     include: {
@@ -186,121 +186,152 @@ exports.generatePdf = async (draftId) => {
       matter: true,
     },
   });
-  if (!form) throw new Error('Form draft not found');
+  if (!form) {
+    console.error('>>> Error: Form draft not found for ID', draftId);
+    throw new Error('Form draft not found');
+  }
 
   const formData = form.form_data;
   const template = form.template;
+  console.log('>>> Draft template:', template.form_number, '| pdf_path:', template.pdf_path);
 
-  // Load master PDF template if it exists on disk, otherwise create a basic PDF
   const uploadDir = path.join(process.cwd(), 'uploads', 'templates');
   const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
-  if (!fs.existsSync(generatedDir)) fs.mkdirSync(generatedDir, { recursive: true });
+  if (!fs.existsSync(generatedDir)) {
+    fs.mkdirSync(generatedDir, { recursive: true });
+    console.log('>>> Created generated directory:', generatedDir);
+  }
 
   let pdfDoc;
-  const masterPath = template.pdf_path
+  let masterPath = template.pdf_path
     ? path.join(process.cwd(), template.pdf_path)
     : null;
 
+  console.log('>>> Calculated template masterPath:', masterPath);
+
   if (masterPath && fs.existsSync(masterPath)) {
-    // Load the real Judicial Council PDF and fill it
-    const existingPdfBytes = fs.readFileSync(masterPath);
-    pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
-    
-    let pdfForm = null;
     try {
-      pdfForm = pdfDoc.getForm();
-    } catch (e) {
-      console.warn('PDF does not contain interactive form fields');
-    }
+      console.log('>>> Attempting to read existing PDF bytes from:', masterPath);
+      const existingPdfBytes = fs.readFileSync(masterPath);
+      console.log('>>> PDF Bytes length:', existingPdfBytes.length);
 
-    if (pdfForm) {
-      const fields = pdfForm.getFields();
-      // Use saved mappings, or fill by matching field names directly
-      for (const field of fields) {
-        const fieldName = field.getName();
-        // Check if there is an explicit mapping
-        const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
-        const systemKey = mapping ? mapping.system_field_path : fieldName;
-        const value = formData[systemKey] || formData[fieldName] || '';
-
-        try {
-          if (field.constructor.name === 'PDFTextField') {
-            field.setText(String(value));
-          } else if (field.constructor.name === 'PDFCheckBox' && value) {
-            field.check();
-          }
-        } catch (_) { /* skip unrecognised fields */ }
+      console.log('>>> Loading PDF bytes into pdf-lib...');
+      pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
+      console.log('>>> PDF document loaded successfully with pdf-lib.');
+      
+      let pdfForm = null;
+      try {
+        pdfForm = pdfDoc.getForm();
+        console.log('>>> PDF Form fetched. Fields count:', pdfForm.getFields().length);
+      } catch (e) {
+        console.warn('>>> PDF does not contain interactive form fields:', e.message);
       }
-      pdfForm.flatten();
+
+      const { PDFTextField, PDFCheckBox, StandardFonts } = require('pdf-lib');
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+      if (pdfForm) {
+        const fields = pdfForm.getFields();
+        for (const field of fields) {
+          const fieldName = field.getName();
+          const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
+          const systemKey = mapping ? mapping.system_field_path : null;
+          
+          // Value resolution path:
+          // 1. Try system mapping
+          // 2. Try direct matching by pdf field name keywords
+          let value = '';
+          if (systemKey) {
+            value = formData[systemKey] || '';
+          }
+          
+          if (!value) {
+            const lowerFieldName = fieldName.toLowerCase();
+            // Match main system keys dynamically
+            if (lowerFieldName.includes('casenumber') || lowerFieldName.includes('case_number') || (lowerFieldName.includes('case') && lowerFieldName.includes('no'))) {
+              value = formData['case_number'];
+            } else if (lowerFieldName.includes('casetitle') || lowerFieldName.includes('casename')) {
+              value = formData['case_title'];
+            } else if (lowerFieldName.includes('attypartyinfo') && lowerFieldName.includes('name')) {
+              value = formData['attorney_name'];
+            } else if (lowerFieldName.includes('attyfirm') || lowerFieldName.includes('firmname')) {
+              value = formData['firm_name'];
+            } else if (lowerFieldName.includes('plaintiff') || lowerFieldName.includes('petitioner')) {
+              value = formData['plaintiff'];
+            } else if (lowerFieldName.includes('defendant') || lowerFieldName.includes('respondent')) {
+              value = formData['defendant'];
+            } else if (lowerFieldName.includes('courtname') || lowerFieldName.includes('superiorcourt')) {
+              value = formData['court_name'];
+            } else if (lowerFieldName.includes('courtaddress')) {
+              value = formData['court_address'];
+            } else {
+              // Try direct key match from custom fields
+              const cleanKey = getCleanFieldName(fieldName);
+              value = formData[cleanKey] || formData[fieldName] || '';
+            }
+          }
+
+          try {
+            if (field instanceof PDFTextField) {
+              try {
+                console.log(`>>> Auto-Filling text field: ${fieldName} -> "${value}"`);
+                field.setText(String(value));
+              } catch (err) {
+                console.warn(`>>> Bypassed field.setText crash for ${fieldName}:`, err.message);
+                try {
+                  field.acroField.setValue(String(value));
+                } catch (_) {}
+              }
+            } else if (field instanceof PDFCheckBox) {
+              const isChecked = value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes');
+              if (isChecked) {
+                console.log(`>>> Auto-Checking checkbox: ${fieldName}`);
+                field.check();
+              } else {
+                field.uncheck();
+              }
+            }
+          } catch (err) {
+            console.warn(`>>> Failed to set field ${fieldName}:`, err.message);
+          }
+        }
+      }
+      try {
+        console.log('>>> Flattening PDF Form...');
+        pdfForm.flatten();
+        console.log('>>> Flattening completed successfully.');
+      } catch (err) {
+        console.warn('>>> Failed to flatten PDF form:', err.message);
+      }
+
+      try {
+        console.log('>>> Saving PDF document bytes inside try block...');
+        const pdfBytes = await pdfDoc.save();
+        console.log('>>> PDF bytes saved successfully. Length:', pdfBytes.length);
+
+        const fileName = `${template.form_number}_matter-${form.matter_id}_${Date.now()}.pdf`;
+        const outputPath = path.join(generatedDir, fileName);
+        fs.writeFileSync(outputPath, pdfBytes);
+        console.log('>>> PDF file written to output path:', outputPath);
+
+        await prisma.generatedForm.update({
+          where: { id: parseInt(draftId) },
+          data: { pdf_file_name: fileName, status: 'completed' },
+        });
+
+        return { fileName, filePath: outputPath, pdfBytes };
+      } catch (saveError) {
+        console.error('>>> CRITICAL ERROR SAVING PDF DOCUMENT:', saveError.message);
+        throw saveError;
+      }
+    } catch (crashError) {
+      console.error('>>> CRITICAL ERROR IN PDF-LIB WORKER:', crashError.message, crashError.stack);
+      throw crashError;
     }
   } else {
-    // No master PDF uploaded yet — create a clean informational PDF
-    pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([612, 792]);
-    const { height } = page.getSize();
-    const font = await pdfDoc.embedStandardFont('Helvetica');
-    const boldFont = await pdfDoc.embedStandardFont('Helvetica-Bold');
-
-    page.drawText(`${template.form_number} — ${template.title}`, {
-      x: 50, y: height - 60, size: 16, font: boldFont,
-    });
-    page.drawText('CALIFORNIA JUDICIAL COUNCIL FORM', {
-      x: 50, y: height - 80, size: 10, font,
-    });
-
-    // Draw a divider line
-    page.drawLine({ start: { x: 50, y: height - 95 }, end: { x: 562, y: height - 95 }, thickness: 1 });
-
-    let y = height - 120;
-    const sections = [
-      { label: 'Case Title', key: 'case_title' },
-      { label: 'Case Number', key: 'case_number' },
-      { label: 'Court', key: 'court_name' },
-      { label: 'Judge', key: 'judge_name' },
-      { label: 'Attorney', key: 'attorney_name' },
-      { label: 'Firm', key: 'firm_name' },
-      { label: 'Plaintiff / Client', key: 'client_name' },
-      { label: 'Defendant', key: 'defendant' },
-      { label: 'Filing Date', key: 'filing_date' },
-      { label: 'Hearing Date', key: 'hearing_date' },
-    ];
-
-    for (const section of sections) {
-      const val = formData[section.key] || '';
-      page.drawText(`${section.label}:`, { x: 50, y, size: 10, font: boldFont });
-      page.drawText(val, { x: 200, y, size: 10, font });
-      y -= 22;
-      if (y < 80) break;
-    }
-
-    // Add remaining custom fields
-    const knownKeys = new Set(sections.map(s => s.key));
-    for (const [key, value] of Object.entries(formData)) {
-      if (knownKeys.has(key) || !value) continue;
-      const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      page.drawText(`${label}:`, { x: 50, y, size: 10, font: boldFont });
-      page.drawText(String(value), { x: 200, y, size: 10, font });
-      y -= 22;
-      if (y < 80) break;
-    }
-
-    page.drawText(`Generated: ${new Date().toLocaleString()}`, {
-      x: 50, y: 40, size: 8, font,
-    });
+    console.error('>>> File does not exist at masterPath:', masterPath);
+    throw new Error('Template PDF file not found on server filesystem');
   }
-
-  const fileName = `${template.form_number}_matter-${form.matter_id}_${Date.now()}.pdf`;
-  const outputPath = path.join(generatedDir, fileName);
-  const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
-  fs.writeFileSync(outputPath, pdfBytes);
-
-  // Update draft record
-  await prisma.generatedForm.update({
-    where: { id: parseInt(draftId) },
-    data: { pdf_file_name: fileName, status: 'completed' },
-  });
-
-  return { fileName, filePath: outputPath, pdfBytes };
 };
 
 // ── MAPPINGS (Admin) ─────────────────────────────────────────
@@ -316,62 +347,6 @@ exports.saveMappings = async (templateId, mappings) => {
     })),
   });
 };
-
-exports.uploadTemplate = async (metaData, file) => {
-  const { form_number, title, practice_area } = metaData;
-  if (!form_number || !title) throw new Error('Form number and title are required');
-  if (!file) throw new Error('PDF file is required');
-
-  const templatesDir = path.join(process.cwd(), 'uploads', 'templates');
-  if (!fs.existsSync(templatesDir)) fs.mkdirSync(templatesDir, { recursive: true });
-
-  const destinationFileName = `${form_number.trim().toUpperCase()}_${Date.now()}.pdf`;
-  const relativePdfPath = path.join('uploads', 'templates', destinationFileName);
-  const absolutePdfPath = path.join(process.cwd(), relativePdfPath);
-
-  // Write file to templates folder
-  fs.writeFileSync(absolutePdfPath, file.buffer);
-
-  // Load and parse PDF using pdf-lib
-  let pdfFieldNames = [];
-  try {
-    const pdfDoc = await PDFDocument.load(file.buffer, { ignoreEncryption: true });
-    const pdfForm = pdfDoc.getForm();
-    const pdfFields = pdfForm.getFields();
-    pdfFieldNames = pdfFields.map(f => f.getName());
-  } catch (err) {
-    console.error('Failed parsing PDF form fields:', err);
-    // Remove the file if parsing failed
-    if (fs.existsSync(absolutePdfPath)) fs.unlinkSync(absolutePdfPath);
-    throw new Error('Invalid fillable PDF template structure');
-  }
-
-  // Check if form_number already exists, if so delete the old one first to overwrite it!
-  const normFormNum = form_number.trim().toUpperCase();
-  const existingForm = await prisma.courtFormTemplate.findUnique({
-    where: { form_number: normFormNum }
-  });
-  if (existingForm) {
-    // 1. Delete physical file
-    const oldPdfPath = path.join(process.cwd(), existingForm.pdf_path);
-    if (fs.existsSync(oldPdfPath)) {
-      try { fs.unlinkSync(oldPdfPath); } catch (e) { console.error('Failed to delete old pdf:', e); }
-    }
-    // 2. Delete database record
-    await prisma.courtFormTemplate.delete({
-      where: { id: existingForm.id }
-    });
-  }
-
-  // Create template record in db
-  const template = await prisma.courtFormTemplate.create({
-    data: {
-      form_number: normFormNum,
-      title: title.trim(),
-      practice_area: practice_area ? practice_area.trim() : null,
-      pdf_path: relativePdfPath,
-    }
-  });
 
 function autoMapFieldName(fieldName) {
   const lower = fieldName.toLowerCase();
@@ -431,6 +406,62 @@ function getCleanFieldName(pdfFieldName) {
   if (clean.toLowerCase().includes('minordob')) return 'Minor DOB';
   return clean;
 }
+
+exports.uploadTemplate = async (metaData, file) => {
+  const { form_number, title, practice_area } = metaData;
+  if (!form_number || !title) throw new Error('Form number and title are required');
+  if (!file) throw new Error('PDF file is required');
+
+  const templatesDir = path.join(process.cwd(), 'uploads', 'templates');
+  if (!fs.existsSync(templatesDir)) fs.mkdirSync(templatesDir, { recursive: true });
+
+  const destinationFileName = `${form_number.trim().toUpperCase()}_${Date.now()}.pdf`;
+  const relativePdfPath = path.join('uploads', 'templates', destinationFileName);
+  const absolutePdfPath = path.join(process.cwd(), relativePdfPath);
+
+  // Write file to templates folder
+  fs.writeFileSync(absolutePdfPath, file.buffer);
+
+  // Load and parse PDF using pdf-lib
+  let pdfFieldNames = [];
+  try {
+    const pdfDoc = await PDFDocument.load(file.buffer, { ignoreEncryption: true });
+    const pdfForm = pdfDoc.getForm();
+    const pdfFields = pdfForm.getFields();
+    pdfFieldNames = pdfFields.map(f => f.getName());
+  } catch (err) {
+    console.error('Failed parsing PDF form fields:', err);
+    // Remove the file if parsing failed
+    if (fs.existsSync(absolutePdfPath)) fs.unlinkSync(absolutePdfPath);
+    throw new Error('Invalid fillable PDF template structure');
+  }
+
+  // Check if form_number already exists, if so delete the old one first to overwrite it!
+  const normFormNum = form_number.trim().toUpperCase();
+  const existingForm = await prisma.courtFormTemplate.findUnique({
+    where: { form_number: normFormNum }
+  });
+  if (existingForm) {
+    // 1. Delete physical file
+    const oldPdfPath = path.join(process.cwd(), existingForm.pdf_path);
+    if (fs.existsSync(oldPdfPath)) {
+      try { fs.unlinkSync(oldPdfPath); } catch (e) { console.error('Failed to delete old pdf:', e); }
+    }
+    // 2. Delete database record
+    await prisma.courtFormTemplate.delete({
+      where: { id: existingForm.id }
+    });
+  }
+
+  // Create template record in db
+  const template = await prisma.courtFormTemplate.create({
+    data: {
+      form_number: normFormNum,
+      title: title.trim(),
+      practice_area: practice_area ? practice_area.trim() : null,
+      pdf_path: relativePdfPath,
+    }
+  });
 
   // Pre-seed empty mapping records for the parsed field names
   if (pdfFieldNames.length > 0) {
