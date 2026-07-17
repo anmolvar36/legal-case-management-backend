@@ -52,6 +52,19 @@ exports.prefillForMatter = async (matterId) => {
     (e) => e.type === 'hearing' || e.type === 'court_date',
   );
 
+  // Fetch custom field values for this matter
+  const customFieldValues = await prisma.matterCustomFieldValue.findMany({
+    where: { matter_id: parseInt(matterId) },
+    include: { field_definition: true }
+  });
+
+  const customFieldsData = {};
+  customFieldValues.forEach(val => {
+    if (val.field_definition) {
+      customFieldsData[val.field_definition.name] = val.value || '';
+    }
+  });
+
   return {
     // Attorney / Firm
     attorney_name: matter.assigned_lawyer?.full_name || '',
@@ -83,6 +96,8 @@ exports.prefillForMatter = async (matterId) => {
       ? nextHearing.event_date.toISOString().split('T')[0]
       : '',
     hearing_location: nextHearing?.location || matter.court_name || '',
+    // Custom Fields
+    ...customFieldsData
   };
 };
 
@@ -384,15 +399,53 @@ function autoMapFieldName(fieldName) {
   return '';
 }
 
+function getCleanFieldName(pdfFieldName) {
+  const parts = pdfFieldName.split('.');
+  const lastPart = parts[parts.length - 1];
+  let clean = lastPart.replace(/\[\d+\]/g, '');
+  clean = clean.replace(/_(ft|cb|rt|ft_|\.b)$/g, '');
+  // Insert spaces before caps
+  clean = clean.replace(/([A-Z])/g, ' $1').trim();
+  
+  // Standard overrides
+  if (clean.toLowerCase().includes('galname')) return 'GAL Name';
+  if (clean.toLowerCase().includes('gdn')) return 'Guardian Name';
+  if (clean.toLowerCase().includes('minorname')) return 'Minor Name';
+  if (clean.toLowerCase().includes('minordob')) return 'Minor DOB';
+  return clean;
+}
+
   // Pre-seed empty mapping records for the parsed field names
   if (pdfFieldNames.length > 0) {
-    await prisma.courtFormMapping.createMany({
-      data: pdfFieldNames.map(fieldName => ({
-        template_id: template.id,
-        pdf_field_name: fieldName,
-        system_field_path: autoMapFieldName(fieldName)
-      }))
-    });
+    for (const fieldName of pdfFieldNames) {
+      let systemPath = autoMapFieldName(fieldName);
+      if (!systemPath) {
+        const cleanName = getCleanFieldName(fieldName);
+        if (cleanName && cleanName.length > 1) {
+          let def = await prisma.customFieldDefinition.findFirst({
+            where: { name: cleanName }
+          });
+          if (!def) {
+            def = await prisma.customFieldDefinition.create({
+              data: {
+                name: cleanName,
+                type: fieldName.toLowerCase().includes('_cb') ? 'checkbox' : 'text',
+                is_active: true
+              }
+            });
+          }
+          systemPath = cleanName;
+        }
+      }
+
+      await prisma.courtFormMapping.create({
+        data: {
+          template_id: template.id,
+          pdf_field_name: fieldName,
+          system_field_path: systemPath || ''
+        }
+      });
+    }
   }
 
   return this.getTemplateById(template.id);
