@@ -115,6 +115,15 @@ const getFolderCounts = async (req, res) => {
   }
 };
 
+const getCustomFolders = async (req, res) => {
+  try {
+    const folders = await titanEmailService.getCustomFolders(req.user.id);
+    res.json({ success: true, data: folders });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   syncAccount,
   getMessages,
@@ -127,4 +136,5 @@ module.exports = {
   getThread,
   bulkAction,
   getFolderCounts,
+  getCustomFolders,
 };

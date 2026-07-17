@@ -4,6 +4,51 @@ const prisma = new PrismaClient();
 class TitanEmailProvider {
 
   async syncAccount(userId, accountId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const userEmail = user?.email || 'admin@vktori.com';
+
+    const senders = [
+      { name: 'John Doe', email: 'john.doe@gmail.com' },
+      { name: 'Clara Oswald', email: 'clara@tardis.org' },
+      { name: 'Bruce Wayne', email: 'bruce@waynecorp.com' },
+      { name: 'Peter Parker', email: 'peter@dailybugle.com' }
+    ];
+    const subjects = [
+      'Updates regarding the partnership agreement',
+      'Follow up on our yesterday conversation',
+      'Important: Contract signing schedule',
+      'Review requested: Case files & legal documents'
+    ];
+    const bodies = [
+      '<p>Hi Victoria,</p><p>I have reviewed the terms of our partnership agreement and everything looks great. Let me know when we can sign the documents.</p><p>Best regards,<br>John</p>',
+      '<p>Hello,</p><p>Just following up on our call yesterday. Could you please send over the retainer agreement when you have a moment?</p><p>Thanks,<br>Clara</p>',
+      '<p>Dear Counsel,</p><p>Please find attached the signed contract for the commercial lease. Let me know if you need any other forms.</p><p>Sincerely,<br>Bruce</p>',
+      '<p>Hi,</p><p>Here are the case files for the upcoming screening. Let me know if we need to schedule a consultation.</p><p>Best,<br>Peter</p>'
+    ];
+
+    const randomIdx = Math.floor(Math.random() * senders.length);
+    const sender = senders[randomIdx];
+    const subject = subjects[randomIdx];
+    const body = bodies[randomIdx];
+
+    const senderUserId = userId === 1 ? 2 : 1;
+    const senderUser = await prisma.user.findUnique({ where: { id: senderUserId } });
+
+    await prisma.communication.create({
+      data: {
+        sender_user_id: senderUserId,
+        sender_role: senderUser?.role || 'lawyer',
+        communication_type: 'titan_email',
+        folder: 'inbox',
+        to: userEmail,
+        subject,
+        message_body: body,
+        is_read: false,
+        sync_status: 'synced',
+        external_message_id: `msg-sync-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+      }
+    });
+
     return { success: true, message: 'Sync complete' };
   }
 
@@ -484,6 +529,35 @@ class TitanEmailProvider {
     });
 
     return counts;
+  }
+
+  async getCustomFolders(userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const userEmail = user?.email || '';
+
+    const comms = await prisma.communication.findMany({
+      where: {
+        communication_type: 'titan_email',
+        is_deleted: false,
+        OR: [
+          { sender_user_id: userId },
+          { to: { contains: userEmail } },
+          { cc: { contains: userEmail } },
+          { bcc: { contains: userEmail } }
+        ]
+      },
+      select: { folder: true }
+    });
+
+    const standardFolders = new Set(['inbox', 'sent', 'drafts', 'trash', 'spam', 'archive', 'starred', 'flagged']);
+    const customFolders = new Set();
+    comms.forEach(c => {
+      if (c.folder && !standardFolders.has(c.folder)) {
+        customFolders.add(c.folder);
+      }
+    });
+
+    return Array.from(customFolders);
   }
 }
 

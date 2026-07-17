@@ -7,6 +7,7 @@ router.use(protect);
 
 router.post('/sync', titanEmailController.syncAccount);
 router.get('/folder-counts', titanEmailController.getFolderCounts);
+router.get('/custom-folders', titanEmailController.getCustomFolders);
 router.get('/messages', titanEmailController.getMessages);
 router.get('/messages/:id/thread', titanEmailController.getThread);
 router.post('/send', titanEmailController.sendEmail);
