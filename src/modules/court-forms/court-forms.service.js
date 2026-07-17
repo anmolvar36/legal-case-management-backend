@@ -272,11 +272,12 @@ exports.generatePdf = async (draftId) => {
       console.log('>>> Saving PDF document bytes inside try block...');
       let pdfBytes;
       try {
-        pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
+        // Use clean standard save configuration
+        pdfBytes = await pdfDoc.save();
         console.log('>>> PDF bytes saved successfully. Length:', pdfBytes.length);
       } catch (saveError) {
-        console.error('>>> CRITICAL ERROR SAVING PDF DOCUMENT (FALLBACK TO BASIC SAVE):', saveError.message);
-        pdfBytes = await pdfDoc.save();
+        console.error('>>> CRITICAL ERROR SAVING PDF DOCUMENT:', saveError.message);
+        throw saveError;
       }
 
       const fileName = `${template.form_number}_matter-${form.matter_id}_${Date.now()}.pdf`;
