@@ -330,13 +330,20 @@ exports.generatePdf = async (draftIdRaw) => {
     throw new Error('Template PDF path is missing in database');
   }
 
-  // Path traversal protection
-  const cleanPdfPath = path.normalize(template.pdf_path).replace(/^(\.\.(\/|\\))+/, '');
-  const masterPath = path.join(process.cwd(), cleanPdfPath);
-  const templatesRoot = path.join(process.cwd(), 'uploads', 'templates');
-  if (!masterPath.startsWith(templatesRoot) && !masterPath.startsWith(path.join(process.cwd(), 'src/modules/court-forms/templates'))) {
+  const templatesDirectory = path.resolve(process.cwd(), 'uploads', 'templates');
+  const fallbackDirectory = path.resolve(process.cwd(), 'src', 'modules', 'court-forms', 'templates');
+  const pdfAbsolutePath = path.resolve(process.cwd(), template.pdf_path);
+
+  console.log(`[PDF_GENERATION]\nTemplates directory: ${templatesDirectory}\nPDF path from database: ${template.pdf_path}\nResolved PDF path: ${pdfAbsolutePath}`);
+
+  const isInUploads = pdfAbsolutePath.startsWith(`${templatesDirectory}${path.sep}`) || pdfAbsolutePath === templatesDirectory;
+  const isInFallback = pdfAbsolutePath.startsWith(`${fallbackDirectory}${path.sep}`) || pdfAbsolutePath === fallbackDirectory;
+
+  if (!isInUploads && !isInFallback) {
     throw new Error('Unauthorized path traversal detected');
   }
+
+  const masterPath = pdfAbsolutePath;
 
   console.log('[PDF_GENERATION] Loading PDF file from:', masterPath);
   if (!fsSync.existsSync(masterPath)) {
