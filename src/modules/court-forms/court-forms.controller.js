@@ -119,3 +119,13 @@ exports.uploadTemplate = async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 };
+
+// DELETE /api/court-forms/templates/:id
+exports.deleteTemplate = async (req, res) => {
+  try {
+    await courtFormsService.deleteTemplate(req.params.id);
+    res.json({ message: 'Template deleted successfully' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+};
