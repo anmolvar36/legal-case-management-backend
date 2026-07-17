@@ -354,3 +354,22 @@ exports.uploadTemplate = async (metaData, file) => {
 
   return this.getTemplateById(template.id);
 };
+
+exports.deleteTemplate = async (id) => {
+  const templateId = parseInt(id);
+  const template = await prisma.courtFormTemplate.findUnique({
+    where: { id: templateId }
+  });
+  if (!template) throw new Error('Template not found');
+
+  if (template.pdf_path) {
+    const oldPdfPath = path.join(process.cwd(), template.pdf_path);
+    if (fs.existsSync(oldPdfPath)) {
+      try { fs.unlinkSync(oldPdfPath); } catch (e) { console.error('Failed to delete pdf:', e); }
+    }
+  }
+
+  await prisma.courtFormTemplate.delete({
+    where: { id: templateId }
+  });
+};

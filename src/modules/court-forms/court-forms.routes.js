@@ -13,6 +13,7 @@ router.get('/templates', controller.getTemplates);
 router.post('/templates/upload', upload.single('file'), controller.uploadTemplate);
 router.get('/templates/:id', controller.getTemplateById);
 router.post('/templates/:id/mappings', controller.saveMappings);
+router.delete('/templates/:id', controller.deleteTemplate);
 
 // Prefill system data for a matter
 router.get('/prefill', controller.prefill);
