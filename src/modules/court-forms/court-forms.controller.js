@@ -200,7 +200,8 @@ exports.downloadTemplateOriginal = async (req, res) => {
       return res.status(404).json({ error: 'Template or PDF file not found' });
     }
 
-    const cleanPdfPath = path.normalize(template.pdf_path).replace(/^(\.\.(\/|\\))+/, '');
+    const normalizedPdfPath = template.pdf_path.replace(/\\/g, '/');
+    const cleanPdfPath = path.normalize(normalizedPdfPath).replace(/^(\.\.(\/|\\))+/, '');
     const absolutePath = path.resolve(process.cwd(), cleanPdfPath);
     
     // Path traversal check

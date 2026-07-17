@@ -337,7 +337,8 @@ exports.generatePdf = async (draftIdRaw) => {
 
   const templatesDirectory = path.resolve(process.cwd(), 'uploads', 'templates');
   const fallbackDirectory = path.resolve(process.cwd(), 'src', 'modules', 'court-forms', 'templates');
-  const pdfAbsolutePath = path.resolve(process.cwd(), template.pdf_path);
+  const normalizedPdfPath = template.pdf_path.replace(/\\/g, '/');
+  const pdfAbsolutePath = path.resolve(process.cwd(), normalizedPdfPath);
 
   const isInUploads = pdfAbsolutePath.startsWith(`${templatesDirectory}${path.sep}`) || pdfAbsolutePath === templatesDirectory;
   const isInFallback = pdfAbsolutePath.startsWith(`${fallbackDirectory}${path.sep}`) || pdfAbsolutePath === fallbackDirectory;
