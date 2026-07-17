@@ -8,7 +8,8 @@ exports.getTemplates = async (req, res) => {
     const templates = await courtFormsService.getTemplates(req.query);
     res.json({ data: templates });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error getting templates:', e.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -16,10 +17,13 @@ exports.getTemplates = async (req, res) => {
 exports.getTemplateById = async (req, res) => {
   try {
     const template = await courtFormsService.getTemplateById(req.params.id);
-    if (!template) return res.status(404).json({ error: 'Template not found' });
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
     res.json({ data: template });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error getting template by ID:', e.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -27,11 +31,17 @@ exports.getTemplateById = async (req, res) => {
 exports.prefill = async (req, res) => {
   try {
     const { matter_id } = req.query;
-    if (!matter_id) return res.status(400).json({ error: 'matter_id is required' });
+    if (!matter_id) {
+      return res.status(400).json({ error: 'matter_id is required' });
+    }
     const data = await courtFormsService.prefillForMatter(matter_id);
     res.json({ data });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error prefilling matter:', e.message);
+    if (e.message.includes('not found')) {
+      return res.status(404).json({ error: e.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -41,7 +51,8 @@ exports.getAllDrafts = async (req, res) => {
     const drafts = await courtFormsService.getAllDrafts(req.query);
     res.json({ data: drafts });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error getting drafts:', e.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -51,7 +62,8 @@ exports.createDraft = async (req, res) => {
     const draft = await courtFormsService.createDraft(req.body, req.user.id);
     res.status(201).json({ data: draft });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error creating draft:', e.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -61,7 +73,11 @@ exports.updateDraft = async (req, res) => {
     const draft = await courtFormsService.updateDraft(req.params.id, req.body, req.user.id);
     res.json({ data: draft });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error updating draft:', e.message);
+    if (e.message.includes('not found')) {
+      return res.status(404).json({ error: e.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -71,19 +87,34 @@ exports.deleteDraft = async (req, res) => {
     await courtFormsService.deleteDraft(req.params.id);
     res.json({ message: 'Draft deleted' });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error deleting draft:', e.message);
+    if (e.message.includes('not found') || e.message.includes('Record to delete does not exist')) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
 // POST /api/court-forms/generate/:id — Fill and download the PDF
 exports.generatePdf = async (req, res) => {
   try {
+    const draftId = Number.parseInt(req.params.id, 10);
+    if (Number.isNaN(draftId)) {
+      return res.status(400).json({ error: 'Invalid draft ID' });
+    }
     const { fileName, pdfBytes } = await courtFormsService.generatePdf(req.params.id);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.end(Buffer.from(pdfBytes));
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[PDF_GENERATION] Error generating PDF:', e.message);
+    if (e.message.includes('not found')) {
+      return res.status(404).json({ error: e.message });
+    }
+    if (e.message.includes('XFA-only') || e.message.includes('zero usable fields')) {
+      return res.status(400).json({ error: e.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -91,12 +122,34 @@ exports.generatePdf = async (req, res) => {
 // GET /api/court-forms/generated/:filename
 exports.serveGenerated = async (req, res) => {
   try {
-    const filePath = path.join(process.cwd(), 'uploads', 'generated', req.params.filename);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    const filename = req.params.filename;
+    const safeFilename = path.basename(filename);
+    if (safeFilename !== filename) {
+      console.warn(`[COURT_FORMS] [SECURITY] Path traversal attempt blocked: "${filename}"`);
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
+    const filePath = path.join(generatedDir, safeFilename);
+
+    const resolvedPath = path.resolve(filePath);
+    const resolvedGeneratedDir = path.resolve(generatedDir);
+    if (!resolvedPath.startsWith(resolvedGeneratedDir)) {
+      console.warn(`[COURT_FORMS] [SECURITY] Path traversal directory mismatch blocked: "${resolvedPath}"`);
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[COURT_FORMS] File not found: "${filePath}"`);
+      return res.status(404).json({ error: 'File not found' });
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline');
     res.sendFile(filePath);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error serving generated file:', e.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -106,7 +159,8 @@ exports.saveMappings = async (req, res) => {
     await courtFormsService.saveMappings(req.params.id, req.body.mappings);
     res.json({ message: 'Mappings saved successfully' });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error saving mappings:', e.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -116,7 +170,11 @@ exports.uploadTemplate = async (req, res) => {
     const template = await courtFormsService.uploadTemplate(req.body, req.file);
     res.status(201).json({ data: template });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[PDF_UPLOAD] Error uploading template:', e.message);
+    if (e.message.includes('required') || e.message.includes('Invalid') || e.message.includes('zero usable fields') || e.message.includes('XFA-only')) {
+      return res.status(400).json({ error: e.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -126,6 +184,10 @@ exports.deleteTemplate = async (req, res) => {
     await courtFormsService.deleteTemplate(req.params.id);
     res.json({ message: 'Template deleted successfully' });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[COURT_FORMS] Error deleting template:', e.message);
+    if (e.message.includes('not found')) {
+      return res.status(404).json({ error: e.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
   }
 };

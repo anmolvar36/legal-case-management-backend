@@ -1,7 +1,142 @@
 const prisma = require('../../config/db');
 const path = require('path');
-const fs = require('fs');
-const { PDFDocument } = require('pdf-lib');
+const fs = require('fs').promises;
+const fsSync = require('fs');
+const { spawn } = require('child_process');
+const os = require('os');
+const crypto = require('crypto');
+const { PDFDocument, PDFTextField, PDFCheckBox, StandardFonts } = require('pdf-lib');
+
+// Prepend local portable qpdf to PATH on Windows if available
+if (process.platform === 'win32') {
+  const localQpdfBin = path.join(process.cwd(), 'scratch', 'qpdf', 'qpdf-12.3.2-msvc64', 'bin');
+  if (fsSync.existsSync(localQpdfBin)) {
+    process.env.PATH = `${localQpdfBin};${process.env.PATH}`;
+  }
+}
+
+// ── QPDF REPAIR LAYER ────────────────────────────────────────
+
+
+function runQpdf(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    console.log(`[PDF_REPAIR] Spawning QPDF: "${inputPath}" -> "${outputPath}"`);
+    const qpdf = spawn('qpdf', [
+      '--object-streams=disable',
+      '--stream-data=preserve',
+      inputPath,
+      outputPath
+    ]);
+
+    let stderr = '';
+    qpdf.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    qpdf.on('error', (err) => {
+      if (err.code === 'ENOENT') {
+        reject(new Error('QPDF executable is not installed or unavailable in PATH'));
+      } else {
+        reject(err);
+      }
+    });
+
+    qpdf.on('close', (code) => {
+      console.log(`[PDF_REPAIR] QPDF exited with code: ${code}`);
+      if (code === 0 || (code === 3 && fsSync.existsSync(outputPath))) {
+        resolve();
+      } else if (code === 2) {
+        reject(new Error(`QPDF failed with error code 2 (corrupt file): ${stderr}`));
+      } else {
+        reject(new Error(`QPDF failed with exit code ${code}: ${stderr}`));
+      }
+    });
+  });
+}
+
+async function repairPdfBuffer(pdfBuffer) {
+  const tempDir = path.join(os.tmpdir(), `court-forms-repair-${crypto.randomUUID()}`);
+  await fs.mkdir(tempDir, { recursive: true });
+
+  const inputPath = path.join(tempDir, `input-${crypto.randomUUID()}.pdf`);
+  const outputPath = path.join(tempDir, `output-${crypto.randomUUID()}.pdf`);
+
+  try {
+    await fs.writeFile(inputPath, pdfBuffer);
+    await runQpdf(inputPath, outputPath);
+
+    if (!fsSync.existsSync(outputPath)) {
+      throw new Error('QPDF finished execution but output file was not created');
+    }
+
+    const repairedBuffer = await fs.readFile(outputPath);
+    if (!repairedBuffer.toString('binary').startsWith('%PDF-')) {
+      throw new Error('Repaired file signature is invalid (does not start with %PDF-)');
+    }
+
+    return repairedBuffer;
+  } finally {
+    try {
+      if (fsSync.existsSync(inputPath)) await fs.unlink(inputPath);
+      if (fsSync.existsSync(outputPath)) await fs.unlink(outputPath);
+      if (fsSync.existsSync(tempDir)) await fs.rmdir(tempDir);
+    } catch (cleanupErr) {
+      console.warn('[PDF_REPAIR] Failed to clean up temp files:', cleanupErr.message);
+    }
+  }
+}
+
+async function loadRepairablePdf(pdfBuffer) {
+  const loadOptions = {
+    ignoreEncryption: true,
+    updateMetadata: false,
+    throwOnInvalidObject: false,
+  };
+
+  let pdfDoc = null;
+  let originallyFailed = false;
+  let originalErrorMsg = '';
+
+  try {
+    console.log('[COURT_FORMS] Attempting to load original PDF buffer...');
+    pdfDoc = await PDFDocument.load(pdfBuffer, loadOptions);
+    
+    let fieldsCount = 0;
+    try {
+      fieldsCount = pdfDoc.getForm().getFields().length;
+    } catch (_) {}
+    
+    if (fieldsCount === 0) {
+      console.log('[COURT_FORMS] Loaded PDF has 0 fields. Attempting QPDF repair to check if fields can be recovered...');
+      originallyFailed = true;
+      originalErrorMsg = 'Loaded PDF contains 0 fields';
+    }
+  } catch (originalError) {
+    console.warn('[COURT_FORMS] Original PDF loading failed:', originalError.message);
+    originallyFailed = true;
+    originalErrorMsg = originalError.message;
+  }
+
+  if (originallyFailed) {
+    try {
+      const repairedBuffer = await repairPdfBuffer(pdfBuffer);
+      console.log('[COURT_FORMS] Attempting to load repaired PDF buffer...');
+      const repairedDoc = await PDFDocument.load(repairedBuffer, loadOptions);
+      return repairedDoc;
+    } catch (repairError) {
+      console.error('[PDF_REPAIR] Repaired PDF loading also failed:', repairError.message);
+      if (pdfDoc && !originalErrorMsg.includes('0 fields')) {
+        // Return original if repair failed but original did load
+        return pdfDoc;
+      }
+      throw new Error(
+        `Failed to parse PDF document. Original Error: ${originalErrorMsg}. Repair Error: ${repairError.message}`
+      );
+    }
+  }
+
+  return pdfDoc;
+}
 
 // ── TEMPLATES ────────────────────────────────────────────────
 exports.getTemplates = async (query = {}) => {
@@ -28,7 +163,6 @@ exports.getTemplateById = async (id) => {
 };
 
 // ── PREFILL DATA ASSEMBLY ────────────────────────────────────
-// Collects all known system data for a Matter to prefill form fields
 exports.prefillForMatter = async (matterId) => {
   const matter = await prisma.matter.findUnique({
     where: { id: parseInt(matterId) },
@@ -52,7 +186,6 @@ exports.prefillForMatter = async (matterId) => {
     (e) => e.type === 'hearing' || e.type === 'court_date',
   );
 
-  // Fetch custom field values for this matter
   const customFieldValues = await prisma.matterCustomFieldValue.findMany({
     where: { matter_id: parseInt(matterId) },
     include: { field_definition: true }
@@ -65,7 +198,6 @@ exports.prefillForMatter = async (matterId) => {
     }
   });
 
-  // Build client full address from structured fields
   const clientAddr = [
     matter.client?.address_line_1,
     matter.client?.address_line_2,
@@ -74,7 +206,6 @@ exports.prefillForMatter = async (matterId) => {
     matter.client?.postal_code,
   ].filter(Boolean).join(', ');
 
-  // Build firm address from company profile
   const firmAddr = [
     companyProfile?.address_line_1 || companyProfile?.address,
     companyProfile?.city,
@@ -83,19 +214,16 @@ exports.prefillForMatter = async (matterId) => {
   ].filter(Boolean).join(', ');
 
   return {
-    // Attorney / Firm
     attorney_name: matter.assigned_lawyer?.full_name || '',
     attorney_email: matter.assigned_lawyer?.email || '',
     firm_name: companyProfile?.company_name || companyProfile?.name || '',
     firm_address: firmAddr,
     firm_phone: companyProfile?.phone || '',
     firm_email: companyProfile?.email || '',
-    // Client / Plaintiff
     client_name: matter.client?.full_name || '',
     client_address: clientAddr,
     client_phone: matter.client?.phone || '',
     client_email: matter.client?.email || '',
-    // Matter
     case_title: matter.title || '',
     case_number: matter.case_number || '',
     matter_number: matter.matter_number || '',
@@ -104,16 +232,13 @@ exports.prefillForMatter = async (matterId) => {
     filing_date: matter.initial_filing_date
       ? matter.initial_filing_date.toISOString().split('T')[0]
       : '',
-    // Court
     court_name: matter.court_name || '',
     court_address: matter.court_address || '',
     judge_name: matter.judge_name || '',
-    // Hearing
     hearing_date: nextHearing
       ? nextHearing.event_date.toISOString().split('T')[0]
       : (matter.next_hearing ? new Date(matter.next_hearing).toISOString().split('T')[0] : ''),
     hearing_location: nextHearing?.location || matter.court_name || '',
-    // Custom Fields
     ...customFieldsData
   };
 };
@@ -147,6 +272,8 @@ exports.updateDraft = async (id, data, userId) => {
 };
 
 exports.deleteDraft = async (id) => {
+  const form = await prisma.generatedForm.findUnique({ where: { id: parseInt(id) } });
+  if (!form) throw new Error('Form draft not found');
   return prisma.generatedForm.delete({ where: { id: parseInt(id) } });
 };
 
@@ -177,174 +304,173 @@ exports.getAllDrafts = async (query = {}) => {
   });
 };
 
-exports.generatePdf = async (draftId) => {
-  console.log('>>> STARTING PDF GENERATION FOR DRAFT ID:', draftId);
+// ── PDF GENERATION ───────────────────────────────────────────
+exports.generatePdf = async (draftIdRaw) => {
+  const draftId = Number.parseInt(draftIdRaw, 10);
+  if (Number.isNaN(draftId)) {
+    throw new Error('Invalid draft ID');
+  }
+
+  console.log('[PDF_GENERATION] Starting PDF generation for Draft ID:', draftId);
   const form = await prisma.generatedForm.findUnique({
-    where: { id: parseInt(draftId) },
+    where: { id: draftId },
     include: {
       template: { include: { mappings: true } },
       matter: true,
     },
   });
   if (!form) {
-    console.error('>>> Error: Form draft not found for ID', draftId);
+    console.error('[PDF_GENERATION] Error: Form draft not found for ID', draftId);
     throw new Error('Form draft not found');
   }
 
   const formData = form.form_data;
   const template = form.template;
-  console.log('>>> Draft template:', template.form_number, '| pdf_path:', template.pdf_path);
-
-  const uploadDir = path.join(process.cwd(), 'uploads', 'templates');
-  const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
-  if (!fs.existsSync(generatedDir)) {
-    fs.mkdirSync(generatedDir, { recursive: true });
-    console.log('>>> Created generated directory:', generatedDir);
+  if (!template.pdf_path) {
+    throw new Error('Template PDF path is missing in database');
   }
 
-  let pdfDoc;
-  let masterPath = template.pdf_path
-    ? path.join(process.cwd(), template.pdf_path)
-    : null;
+  // Path traversal protection
+  const cleanPdfPath = path.normalize(template.pdf_path).replace(/^(\.\.(\/|\\))+/, '');
+  const masterPath = path.join(process.cwd(), cleanPdfPath);
+  const templatesRoot = path.join(process.cwd(), 'uploads', 'templates');
+  if (!masterPath.startsWith(templatesRoot) && !masterPath.startsWith(path.join(process.cwd(), 'src/modules/court-forms/templates'))) {
+    throw new Error('Unauthorized path traversal detected');
+  }
 
-  console.log('>>> Calculated template masterPath:', masterPath);
-
-  if (masterPath && fs.existsSync(masterPath)) {
-    try {
-      console.log('>>> Attempting to read existing PDF bytes from:', masterPath);
-      const existingPdfBytes = fs.readFileSync(masterPath);
-      console.log('>>> PDF Bytes length:', existingPdfBytes.length);
-
-      console.log('>>> Loading PDF bytes into pdf-lib...');
-      pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
-      console.log('>>> PDF document loaded successfully with pdf-lib.');
-      
-      let pdfForm = null;
-      try {
-        pdfForm = pdfDoc.getForm();
-        console.log('>>> PDF Form fetched. Fields count:', pdfForm.getFields().length);
-      } catch (e) {
-        console.warn('>>> PDF does not contain interactive form fields:', e.message);
-      }
-
-      const { PDFTextField, PDFCheckBox, StandardFonts } = require('pdf-lib');
-      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
-      if (pdfForm) {
-        const fields = pdfForm.getFields();
-        for (const field of fields) {
-          const fieldName = field.getName();
-          const mapping = template.mappings.find((m) => m.pdf_field_name === fieldName);
-          const systemKey = mapping ? mapping.system_field_path : null;
-          
-          // Value resolution path:
-          // 1. Try system mapping
-          // 2. Try direct matching by pdf field name keywords
-          let value = '';
-          if (systemKey) {
-            value = formData[systemKey] || '';
-          }
-          
-          if (!value) {
-            const lowerFieldName = fieldName.toLowerCase();
-            // Match main system keys dynamically
-            if (lowerFieldName.includes('casenumber') || lowerFieldName.includes('case_number') || (lowerFieldName.includes('case') && lowerFieldName.includes('no'))) {
-              value = formData['case_number'];
-            } else if (lowerFieldName.includes('casetitle') || lowerFieldName.includes('casename')) {
-              value = formData['case_title'];
-            } else if (lowerFieldName.includes('attypartyinfo') && lowerFieldName.includes('name')) {
-              value = formData['attorney_name'];
-            } else if (lowerFieldName.includes('attyfirm') || lowerFieldName.includes('firmname')) {
-              value = formData['firm_name'];
-            } else if (lowerFieldName.includes('plaintiff') || lowerFieldName.includes('petitioner')) {
-              value = formData['plaintiff'];
-            } else if (lowerFieldName.includes('defendant') || lowerFieldName.includes('respondent')) {
-              value = formData['defendant'];
-            } else if (lowerFieldName.includes('courtname') || lowerFieldName.includes('superiorcourt')) {
-              value = formData['court_name'];
-            } else if (lowerFieldName.includes('courtaddress')) {
-              value = formData['court_address'];
-            } else {
-              // Try direct key match from custom fields
-              const cleanKey = getCleanFieldName(fieldName);
-              value = formData[cleanKey] || formData[fieldName] || '';
-            }
-          }
-
-          try {
-            if (field instanceof PDFTextField) {
-              try {
-                console.log(`>>> Auto-Filling text field: ${fieldName} -> "${value}"`);
-                field.setText(String(value));
-              } catch (err) {
-                console.warn(`>>> Bypassed field.setText crash for ${fieldName}:`, err.message);
-                try {
-                  field.acroField.setValue(String(value));
-                } catch (_) {}
-              }
-            } else if (field instanceof PDFCheckBox) {
-              const isChecked = value && (value === true || String(value).toLowerCase() === 'true' || String(value).toLowerCase() === 'yes');
-              if (isChecked) {
-                console.log(`>>> Auto-Checking checkbox: ${fieldName}`);
-                field.check();
-              } else {
-                field.uncheck();
-              }
-            }
-          } catch (err) {
-            console.warn(`>>> Failed to set field ${fieldName}:`, err.message);
-          }
-        }
-      }
-      try {
-        console.log('>>> Flattening PDF Form...');
-        pdfForm.flatten();
-        console.log('>>> Flattening completed successfully.');
-      } catch (err) {
-        console.warn('>>> Failed to flatten PDF form:', err.message);
-      }
-
-      try {
-        console.log('>>> Saving PDF document bytes inside try block...');
-        const pdfBytes = await pdfDoc.save();
-        console.log('>>> PDF bytes saved successfully. Length:', pdfBytes.length);
-
-        const fileName = `${template.form_number}_matter-${form.matter_id}_${Date.now()}.pdf`;
-        const outputPath = path.join(generatedDir, fileName);
-        fs.writeFileSync(outputPath, pdfBytes);
-        console.log('>>> PDF file written to output path:', outputPath);
-
-        await prisma.generatedForm.update({
-          where: { id: parseInt(draftId) },
-          data: { pdf_file_name: fileName, status: 'completed' },
-        });
-
-        return { fileName, filePath: outputPath, pdfBytes };
-      } catch (saveError) {
-        console.error('>>> CRITICAL ERROR SAVING PDF DOCUMENT:', saveError.message);
-        throw saveError;
-      }
-    } catch (crashError) {
-      console.error('>>> CRITICAL ERROR IN PDF-LIB WORKER:', crashError.message, crashError.stack);
-      throw crashError;
-    }
-  } else {
-    console.error('>>> File does not exist at masterPath:', masterPath);
+  console.log('[PDF_GENERATION] Loading PDF file from:', masterPath);
+  if (!fsSync.existsSync(masterPath)) {
     throw new Error('Template PDF file not found on server filesystem');
   }
+
+  const existingPdfBytes = await fs.readFile(masterPath);
+  if (!existingPdfBytes.toString('binary').startsWith('%PDF-')) {
+    throw new Error('Template file is not a valid PDF document (missing %PDF- header)');
+  }
+
+  const pdfDoc = await loadRepairablePdf(existingPdfBytes);
+  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  
+  let pdfForm = null;
+  try {
+    pdfForm = pdfDoc.getForm();
+  } catch (e) {
+    console.warn('[PDF_GENERATION] Failed to fetch interactive PDF form object:', e.message);
+  }
+
+  if (!pdfForm || pdfForm.getFields().length === 0) {
+    console.error('[PDF_GENERATION] Error: Document contains zero usable interactive fields.');
+    throw new Error('This PDF template contains zero usable interactive fields (it may be XFA-only or non-interactive). Coordinate-based text overlay is required for this form format.');
+  }
+
+  try {
+    console.log('[PDF_GENERATION] Attempting to remove XFA metadata...');
+    pdfForm.deleteXFA();
+  } catch (xfaError) {
+    console.warn('[PDF_GENERATION] Warning: Failed to delete XFA metadata:', xfaError.message);
+  }
+
+  const fields = pdfForm.getFields();
+  for (const field of fields) {
+    const fieldName = field.getName();
+    const dbFieldName = fieldName.length > 190 ? fieldName.substring(0, 190) : fieldName;
+    const mapping = template.mappings.find((m) => m.pdf_field_name === dbFieldName);
+    const systemKey = mapping ? mapping.system_field_path : null;
+
+    let value = '';
+    if (systemKey) {
+      value = formData[systemKey] || '';
+    }
+    if (!value) {
+      value = autoMapFieldName(fieldName);
+      if (value) {
+        value = formData[value] || '';
+      }
+    }
+    if (!value) {
+      const cleanName = getCleanFieldName(fieldName);
+      value = formData[cleanName] || '';
+    }
+    if (!value) {
+      value = formData[fieldName] || '';
+    }
+
+    try {
+      if (field instanceof PDFTextField) {
+        console.log(`[PDF_GENERATION] Filling text: ${fieldName} -> "${value}"`);
+        field.setText(String(value));
+      } else if (field instanceof PDFCheckBox) {
+        const lowerVal = String(value).toLowerCase();
+        const isChecked = value === true || lowerVal === 'true' || lowerVal === 'yes' || lowerVal === '1' || lowerVal === 'on';
+        if (isChecked) {
+          console.log(`[PDF_GENERATION] Checking checkbox: ${fieldName}`);
+          field.check();
+        } else {
+          field.uncheck();
+        }
+      }
+    } catch (fieldErr) {
+      console.warn(`[PDF_GENERATION] Failed to fill field "${fieldName}":`, fieldErr.message);
+    }
+  }
+
+  try {
+    console.log('[PDF_GENERATION] Updating field appearances...');
+    pdfForm.updateFieldAppearances(helveticaFont);
+  } catch (appErr) {
+    console.warn('[PDF_GENERATION] Failed to update field appearances:', appErr.message);
+  }
+
+  try {
+    console.log('[PDF_GENERATION] Flattening PDF Form...');
+    pdfForm.flatten();
+  } catch (flattenErr) {
+    console.warn('[PDF_GENERATION] Flattening failed (generating editable PDF fallback):', flattenErr.message);
+  }
+
+  const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
+  if (!fsSync.existsSync(generatedDir)) {
+    await fs.mkdir(generatedDir, { recursive: true });
+  }
+
+  const sanitizedFormNumber = template.form_number.replace(/[^a-zA-Z0-9_-]/g, '_').toUpperCase();
+  const fileName = `${sanitizedFormNumber}_matter-${form.matter_id}_${Date.now()}.pdf`;
+  const outputPath = path.join(generatedDir, fileName);
+
+  const pdfBytes = await pdfDoc.save({
+    useObjectStreams: false,
+    addDefaultPage: false,
+    objectsPerTick: 20
+  });
+
+  await fs.writeFile(outputPath, pdfBytes);
+  console.log('[PDF_GENERATION] PDF file written successfully:', outputPath);
+
+  await prisma.generatedForm.update({
+    where: { id: draftId },
+    data: { pdf_file_name: fileName, status: 'completed' },
+  });
+
+  return { fileName, filePath: outputPath, pdfBytes };
 };
 
 // ── MAPPINGS (Admin) ─────────────────────────────────────────
 exports.saveMappings = async (templateId, mappings) => {
-  // Delete existing and re-insert in one go
   await prisma.courtFormMapping.deleteMany({ where: { template_id: parseInt(templateId) } });
-  if (!mappings || mappings.length === 0) return [];
-  return prisma.courtFormMapping.createMany({
-    data: mappings.map((m) => ({
+  const seenPdfFieldNames = new Set();
+  const uniqueMappings = [];
+  for (const m of mappings) {
+    const dbFieldName = m.pdf_field_name.length > 190 ? m.pdf_field_name.substring(0, 190) : m.pdf_field_name;
+    if (seenPdfFieldNames.has(dbFieldName)) continue;
+    seenPdfFieldNames.add(dbFieldName);
+    uniqueMappings.push({
       template_id: parseInt(templateId),
-      pdf_field_name: m.pdf_field_name,
+      pdf_field_name: dbFieldName,
       system_field_path: m.system_field_path || '',
-    })),
+    });
+  }
+  return prisma.courtFormMapping.createMany({
+    data: uniqueMappings
   });
 };
 
@@ -355,7 +481,6 @@ function autoMapFieldName(fieldName) {
   if (lower.includes('casetitle') || lower.includes('casename') || (lower.includes('case') && lower.includes('title')) || (lower.includes('case') && lower.includes('name'))) return 'case_title';
   if (lower.includes('judgename') || lower.includes('judge') || lower.includes('dept')) return 'judge_name';
   
-  // Attorney / Firm
   if (lower.includes('attypartyinfo') && lower.includes('name')) return 'attorney_name';
   if (lower.includes('attorneyname') || lower.includes('attyname') || lower.includes('lawyername')) return 'attorney_name';
   
@@ -370,21 +495,17 @@ function autoMapFieldName(fieldName) {
   if (lower.includes('attypartyinfo') && (lower.includes('phone') || lower.includes('telephone') || lower.includes('telno'))) return 'firm_phone';
   if (lower.includes('firmphone') || lower.includes('firm_phone')) return 'firm_phone';
   
-  // Parties
   if (lower.includes('plaintiff') || lower.includes('petitioner') || lower.includes('pltf')) return 'plaintiff';
   if (lower.includes('defendant') || lower.includes('respondent') || lower.includes('deft')) return 'defendant';
   
-  // Client details
   if (lower.includes('clientname') || lower.includes('client_name')) return 'client_name';
   if (lower.includes('clientemail') || lower.includes('client_email')) return 'client_email';
   if (lower.includes('clientphone') || lower.includes('client_phone')) return 'client_phone';
   if (lower.includes('clientaddress') || lower.includes('client_address')) return 'client_address';
   
-  // Court
   if (lower.includes('courtname') || lower.includes('court_name') || lower.includes('superiorcourt')) return 'court_name';
   if (lower.includes('courtaddress') || lower.includes('court_address')) return 'court_address';
   
-  // Dates
   if (lower.includes('filingdate') || lower.includes('filing_date')) return 'filing_date';
   if (lower.includes('hearingdate') || lower.includes('hearing_date')) return 'hearing_date';
   
@@ -396,10 +517,8 @@ function getCleanFieldName(pdfFieldName) {
   const lastPart = parts[parts.length - 1];
   let clean = lastPart.replace(/\[\d+\]/g, '');
   clean = clean.replace(/_(ft|cb|rt|ft_|\.b)$/g, '');
-  // Insert spaces before caps
   clean = clean.replace(/([A-Z])/g, ' $1').trim();
   
-  // Standard overrides
   if (clean.toLowerCase().includes('galname')) return 'GAL Name';
   if (clean.toLowerCase().includes('gdn')) return 'Guardian Name';
   if (clean.toLowerCase().includes('minorname')) return 'Minor Name';
@@ -412,48 +531,84 @@ exports.uploadTemplate = async (metaData, file) => {
   if (!form_number || !title) throw new Error('Form number and title are required');
   if (!file) throw new Error('PDF file is required');
 
+  // Enforce size limit (25 MB) and MIME/signature constraints
+  if (file.size > 25 * 1024 * 1024) {
+    throw new Error('PDF template file size exceeds the 25 MB limit');
+  }
+  if (file.mimetype !== 'application/pdf') {
+    throw new Error('Only PDF templates are accepted');
+  }
+  if (!file.buffer.toString('binary').startsWith('%PDF-')) {
+    throw new Error('Uploaded file is not a valid PDF document (missing %PDF- header)');
+  }
+
   const templatesDir = path.join(process.cwd(), 'uploads', 'templates');
-  if (!fs.existsSync(templatesDir)) fs.mkdirSync(templatesDir, { recursive: true });
+  if (!fsSync.existsSync(templatesDir)) {
+    await fs.mkdir(templatesDir, { recursive: true });
+  }
 
   const destinationFileName = `${form_number.trim().toUpperCase()}_${Date.now()}.pdf`;
   const relativePdfPath = path.join('uploads', 'templates', destinationFileName);
   const absolutePdfPath = path.join(process.cwd(), relativePdfPath);
 
-  // Write file to templates folder
-  fs.writeFileSync(absolutePdfPath, file.buffer);
-
-  // Load and parse PDF using pdf-lib
   let pdfFieldNames = [];
+  let pdfDoc = null;
+
   try {
-    const pdfDoc = await PDFDocument.load(file.buffer, { ignoreEncryption: true });
-    const pdfForm = pdfDoc.getForm();
-    const pdfFields = pdfForm.getFields();
-    pdfFieldNames = pdfFields.map(f => f.getName());
+    console.log('[PDF_UPLOAD] Validating and parsing uploaded template...');
+    pdfDoc = await loadRepairablePdf(file.buffer);
+    
+    let pdfForm = null;
+    try {
+      pdfForm = pdfDoc.getForm();
+    } catch (formErr) {
+      console.warn('[PDF_UPLOAD] Failed to get form objects:', formErr.message);
+    }
+
+    if (!pdfForm || pdfForm.getFields().length === 0) {
+      console.error('[PDF_UPLOAD] Uploaded document has 0 interactive fields.');
+      throw new Error('This PDF template contains zero usable interactive fields (it may be XFA-only or non-interactive). Coordinate-based text overlay is required for this form format.');
+    }
+
+    pdfFieldNames = pdfForm.getFields().map(f => f.getName());
   } catch (err) {
-    console.error('Failed parsing PDF form fields:', err);
-    // Remove the file if parsing failed
-    if (fs.existsSync(absolutePdfPath)) fs.unlinkSync(absolutePdfPath);
-    throw new Error('Invalid fillable PDF template structure');
+    console.error('[PDF_UPLOAD] Validation failed:', err.message);
+    throw err;
   }
 
-  // Check if form_number already exists, if so delete the old one first to overwrite it!
+  // Save the normalized, clean version of PDF using pdf-lib
+  try {
+    const normalizedBytes = await pdfDoc.save({
+      useObjectStreams: false,
+      addDefaultPage: false,
+      updateFieldAppearances: false
+    });
+    await fs.writeFile(absolutePdfPath, normalizedBytes);
+    console.log('[PDF_UPLOAD] Normalized template written successfully to:', absolutePdfPath);
+  } catch (saveErr) {
+    console.error('[PDF_UPLOAD] Failed to write normalized template:', saveErr.message);
+    if (fsSync.existsSync(absolutePdfPath)) {
+      await fs.unlink(absolutePdfPath);
+    }
+    throw new Error('Failed to save repaired/normalized PDF template: ' + saveErr.message);
+  }
+
+  // Overwrite existing templates with same form number
   const normFormNum = form_number.trim().toUpperCase();
   const existingForm = await prisma.courtFormTemplate.findUnique({
     where: { form_number: normFormNum }
   });
   if (existingForm) {
-    // 1. Delete physical file
     const oldPdfPath = path.join(process.cwd(), existingForm.pdf_path);
-    if (fs.existsSync(oldPdfPath)) {
-      try { fs.unlinkSync(oldPdfPath); } catch (e) { console.error('Failed to delete old pdf:', e); }
+    if (fsSync.existsSync(oldPdfPath)) {
+      try { await fs.unlink(oldPdfPath); } catch (e) { console.error('[PDF_UPLOAD] Failed to delete old pdf:', e.message); }
     }
-    // 2. Delete database record
     await prisma.courtFormTemplate.delete({
       where: { id: existingForm.id }
     });
   }
 
-  // Create template record in db
+  // Save template record in database
   const template = await prisma.courtFormTemplate.create({
     data: {
       form_number: normFormNum,
@@ -465,33 +620,72 @@ exports.uploadTemplate = async (metaData, file) => {
 
   // Pre-seed empty mapping records for the parsed field names
   if (pdfFieldNames.length > 0) {
+    const seenDbFieldNames = new Set();
+    const mappingRecords = [];
+    
+    // Fetch all active custom field definitions at once
+    const allFieldDefs = await prisma.customFieldDefinition.findMany({
+      where: { is_active: true }
+    });
+    const fieldDefMap = new Map(allFieldDefs.map(d => [d.name, d]));
+    
+    const newFieldDefsToCreate = [];
+    const fieldsToProcess = [];
+    
     for (const fieldName of pdfFieldNames) {
+      const dbFieldName = fieldName.length > 190 ? fieldName.substring(0, 190) : fieldName;
+      if (seenDbFieldNames.has(dbFieldName)) continue;
+      seenDbFieldNames.add(dbFieldName);
+
       let systemPath = autoMapFieldName(fieldName);
       if (!systemPath) {
         const cleanName = getCleanFieldName(fieldName);
         if (cleanName && cleanName.length > 1) {
-          let def = await prisma.customFieldDefinition.findFirst({
-            where: { name: cleanName }
-          });
-          if (!def) {
-            def = await prisma.customFieldDefinition.create({
-              data: {
-                name: cleanName,
-                type: fieldName.toLowerCase().includes('_cb') ? 'checkbox' : 'text',
-                is_active: true
-              }
-            });
-          }
           systemPath = cleanName;
+          if (!fieldDefMap.has(cleanName)) {
+            newFieldDefsToCreate.push({
+              name: cleanName,
+              type: fieldName.toLowerCase().includes('_cb') ? 'checkbox' : 'text',
+              is_active: true
+            });
+            // Add placeholder to prevent duplicates in the same run
+            fieldDefMap.set(cleanName, { name: cleanName });
+          }
         }
       }
-
-      await prisma.courtFormMapping.create({
-        data: {
-          template_id: template.id,
-          pdf_field_name: fieldName,
-          system_field_path: systemPath || ''
+      
+      fieldsToProcess.push({ dbFieldName, systemPath });
+    }
+    
+    // Batch create new definitions
+    if (newFieldDefsToCreate.length > 0) {
+      const uniqueNewDefs = [];
+      const seenNames = new Set();
+      for (const def of newFieldDefsToCreate) {
+        if (!seenNames.has(def.name)) {
+          seenNames.add(def.name);
+          uniqueNewDefs.push(def);
         }
+      }
+      await prisma.customFieldDefinition.createMany({
+        data: uniqueNewDefs,
+        skipDuplicates: true
+      });
+    }
+
+    // Construct mapping records list
+    for (const item of fieldsToProcess) {
+      mappingRecords.push({
+        template_id: template.id,
+        pdf_field_name: item.dbFieldName,
+        system_field_path: item.systemPath || ''
+      });
+    }
+
+    // Batch insert mappings
+    if (mappingRecords.length > 0) {
+      await prisma.courtFormMapping.createMany({
+        data: mappingRecords
       });
     }
   }
@@ -508,8 +702,8 @@ exports.deleteTemplate = async (id) => {
 
   if (template.pdf_path) {
     const oldPdfPath = path.join(process.cwd(), template.pdf_path);
-    if (fs.existsSync(oldPdfPath)) {
-      try { fs.unlinkSync(oldPdfPath); } catch (e) { console.error('Failed to delete pdf:', e); }
+    if (fsSync.existsSync(oldPdfPath)) {
+      try { await fs.unlink(oldPdfPath); } catch (e) { console.error('[COURT_FORMS] Failed to delete pdf:', e.message); }
     }
   }
 
