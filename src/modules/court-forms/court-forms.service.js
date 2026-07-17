@@ -172,7 +172,7 @@ exports.generatePdf = async (draftId) => {
   if (masterPath && fs.existsSync(masterPath)) {
     // Load the real Judicial Council PDF and fill it
     const existingPdfBytes = fs.readFileSync(masterPath);
-    pdfDoc = await PDFDocument.load(existingPdfBytes);
+    pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
     const pdfForm = pdfDoc.getForm();
     const fields = pdfForm.getFields();
 
@@ -295,7 +295,7 @@ exports.uploadTemplate = async (metaData, file) => {
   // Load and parse PDF using pdf-lib
   let pdfFieldNames = [];
   try {
-    const pdfDoc = await PDFDocument.load(file.buffer);
+    const pdfDoc = await PDFDocument.load(file.buffer, { ignoreEncryption: true });
     const pdfForm = pdfDoc.getForm();
     const pdfFields = pdfForm.getFields();
     pdfFieldNames = pdfFields.map(f => f.getName());
