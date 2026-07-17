@@ -73,6 +73,48 @@ const deleteMessage = async (req, res) => {
   }
 };
 
+const restoreMessage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const message = await titanEmailService.restoreMessage(req.user.id, id);
+    res.json({ success: true, data: message });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getThread = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const thread = await titanEmailService.getThread(req.user.id, id);
+    res.json({ success: true, data: thread });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const bulkAction = async (req, res) => {
+  try {
+    const { messageIds, action } = req.body;
+    if (!messageIds || !Array.isArray(messageIds) || !action) {
+      return res.status(400).json({ success: false, message: 'messageIds (array) and action are required' });
+    }
+    const result = await titanEmailService.bulkAction(req.user.id, messageIds, action);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getFolderCounts = async (req, res) => {
+  try {
+    const counts = await titanEmailService.getFolderCounts(req.user.id);
+    res.json({ success: true, data: counts });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   syncAccount,
   getMessages,
@@ -80,5 +122,9 @@ module.exports = {
   saveDraft,
   updateMessageState,
   moveMessage,
-  deleteMessage
+  deleteMessage,
+  restoreMessage,
+  getThread,
+  bulkAction,
+  getFolderCounts,
 };
