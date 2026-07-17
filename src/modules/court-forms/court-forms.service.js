@@ -65,17 +65,34 @@ exports.prefillForMatter = async (matterId) => {
     }
   });
 
+  // Build client full address from structured fields
+  const clientAddr = [
+    matter.client?.address_line_1,
+    matter.client?.address_line_2,
+    matter.client?.city,
+    matter.client?.state,
+    matter.client?.postal_code,
+  ].filter(Boolean).join(', ');
+
+  // Build firm address from company profile
+  const firmAddr = [
+    companyProfile?.address_line_1 || companyProfile?.address,
+    companyProfile?.city,
+    companyProfile?.state,
+    companyProfile?.postal_code,
+  ].filter(Boolean).join(', ');
+
   return {
     // Attorney / Firm
     attorney_name: matter.assigned_lawyer?.full_name || '',
     attorney_email: matter.assigned_lawyer?.email || '',
-    firm_name: companyProfile?.company_name || '',
-    firm_address: companyProfile?.address || '',
+    firm_name: companyProfile?.company_name || companyProfile?.name || '',
+    firm_address: firmAddr,
     firm_phone: companyProfile?.phone || '',
     firm_email: companyProfile?.email || '',
     // Client / Plaintiff
     client_name: matter.client?.full_name || '',
-    client_address: matter.client?.address || '',
+    client_address: clientAddr,
     client_phone: matter.client?.phone || '',
     client_email: matter.client?.email || '',
     // Matter
@@ -94,7 +111,7 @@ exports.prefillForMatter = async (matterId) => {
     // Hearing
     hearing_date: nextHearing
       ? nextHearing.event_date.toISOString().split('T')[0]
-      : '',
+      : (matter.next_hearing ? new Date(matter.next_hearing).toISOString().split('T')[0] : ''),
     hearing_location: nextHearing?.location || matter.court_name || '',
     // Custom Fields
     ...customFieldsData
