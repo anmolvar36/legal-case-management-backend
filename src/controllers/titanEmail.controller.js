@@ -1,0 +1,84 @@
+const titanEmailService = require('../services/email/titanEmail.service');
+
+const syncAccount = async (req, res) => {
+  try {
+    const { accountId } = req.body;
+    const result = await titanEmailService.syncAccount(req.user.id, accountId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getMessages = async (req, res) => {
+  try {
+    const { accountId, folder, is_starred, is_flagged, is_draft, search } = req.query;
+    const messages = await titanEmailService.getMessages(req.user.id, accountId, {
+      folder, is_starred, is_flagged, is_draft, search
+    });
+    res.json({ success: true, data: messages });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const sendEmail = async (req, res) => {
+  try {
+    const { accountId, ...payload } = req.body;
+    const message = await titanEmailService.sendEmail(req.user.id, req.user.role, accountId, payload);
+    res.json({ success: true, data: message });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const saveDraft = async (req, res) => {
+  try {
+    const { accountId, ...payload } = req.body;
+    const message = await titanEmailService.saveDraft(req.user.id, req.user.role, accountId, payload);
+    res.json({ success: true, data: message });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateMessageState = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const message = await titanEmailService.updateMessageState(req.user.id, id, req.body);
+    res.json({ success: true, data: message });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const moveMessage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { folder } = req.body;
+    const message = await titanEmailService.moveMessage(req.user.id, id, folder);
+    res.json({ success: true, data: message });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteMessage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const message = await titanEmailService.deleteMessage(req.user.id, id);
+    res.json({ success: true, data: message });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = {
+  syncAccount,
+  getMessages,
+  sendEmail,
+  saveDraft,
+  updateMessageState,
+  moveMessage,
+  deleteMessage
+};

@@ -31,11 +31,11 @@
     "papaparse": "^5.5.4",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.18.0",
-    "prisma": "^5.22.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "prisma": "^5.22.0"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

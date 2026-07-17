@@ -24,6 +24,7 @@ const notificationRoutes = require('../modules/notifications/notifications.route
 const templatesRoutes = require('../modules/templates/templates.routes');
 const searchRoutes = require('../modules/search/search.routes');
 const importRoutes = require('../modules/import/import.routes');
+const titanEmailRoutes = require('./titanEmail.routes');
 
 const marketingController = require('../modules/marketing/marketing.controller');
 const { protect } = require('../middlewares/auth.middleware');
@@ -56,5 +57,6 @@ router.use('/reports', reportsRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/templates', templatesRoutes);
 router.use('/import', importRoutes);
+router.use('/titan-email', titanEmailRoutes);
 
 module.exports = router;

@@ -44,6 +44,7 @@ enum CommunicationType {
   email_log
   call_log
   meeting_log
+  titan_email
 }
 
 enum InvoiceStatus {
@@ -107,6 +108,7 @@ model User {
   outlook_token_expires DateTime?
   signature             String? @db.Text
   generated_forms       GeneratedForm[]
+  email_accounts        EmailAccount[]
 
   @@map("users")
 }
@@ -302,6 +304,22 @@ model Communication {
   opened              Boolean        @default(false)
   opened_time         DateTime?
   open_count          Int            @default(0)
+
+  // Titan Email Sync Fields
+  folder              String?
+  external_message_id String?
+  external_thread_id  String?
+  in_reply_to         String?
+  references          String?        @db.Text
+  is_starred          Boolean        @default(false)
+  is_flagged          Boolean        @default(false)
+  is_draft            Boolean        @default(false)
+  is_archived         Boolean        @default(false)
+  is_spam             Boolean        @default(false)
+  is_deleted          Boolean        @default(false)
+  sync_status         String?
+  email_account_id    Int?
+
   created_at         DateTime          @default(now())
   updated_at         DateTime          @updatedAt
 
@@ -310,8 +328,33 @@ model Communication {
   sender             User              @relation(fields: [sender_user_id], references: [id])
   parent             Communication?    @relation("Thread", fields: [parent_id], references: [id])
   replies            Communication[]   @relation("Thread")
+  email_account      EmailAccount?     @relation(fields: [email_account_id], references: [id])
 
   @@map("communications")
+}
+
+model EmailAccount {
+  id               Int      @id @default(autoincrement())
+  user_id          Int
+  provider         String
+  email_address    String
+  smtp_host        String?
+  smtp_port        Int?
+  imap_host        String?
+  imap_port        Int?
+  username         String?
+  password         String?  // Store securely if ever used
+  access_token     String?  @db.Text
+  refresh_token    String?  @db.Text
+  sync_status      String?
+  last_sync_at     DateTime?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  user             User            @relation(fields: [user_id], references: [id])
+  communications   Communication[]
+
+  @@map("email_accounts")
 }
 
 model Invoice {
