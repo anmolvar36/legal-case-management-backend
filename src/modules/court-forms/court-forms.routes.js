@@ -36,6 +36,7 @@ const handleUpload = (req, res, next) => {
 router.get('/templates', controller.getTemplates);
 router.post('/templates/upload', handleUpload, controller.uploadTemplate);
 router.get('/templates/:id', controller.getTemplateById);
+router.get('/templates/:id/download', controller.downloadTemplateOriginal);
 router.post('/templates/:id/mappings', controller.saveMappings);
 router.delete('/templates/:id', controller.deleteTemplate);
 

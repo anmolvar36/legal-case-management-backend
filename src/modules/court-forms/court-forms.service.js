@@ -358,81 +358,58 @@ exports.generatePdf = async (draftIdRaw) => {
   const pdfDoc = await loadRepairablePdf(existingPdfBytes);
   const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
   
-  let pdfForm = null;
-  try {
-    pdfForm = pdfDoc.getForm();
-  } catch (e) {
-    console.warn('[PDF_GENERATION] Failed to fetch interactive PDF form object:', e.message);
-  }
-
-  if (!pdfForm || pdfForm.getFields().length === 0) {
-    console.error('[PDF_GENERATION] Error: Document contains zero usable interactive fields.');
-    throw new Error('This PDF template contains zero usable interactive fields (it may be XFA-only or non-interactive). Coordinate-based text overlay is required for this form format.');
-  }
-
-  try {
-    console.log('[PDF_GENERATION] Attempting to remove XFA metadata...');
-    pdfForm.deleteXFA();
-  } catch (xfaError) {
-    console.warn('[PDF_GENERATION] Warning: Failed to delete XFA metadata:', xfaError.message);
-  }
-
-  const fields = pdfForm.getFields();
-  for (const field of fields) {
-    const fieldName = field.getName();
-    const dbFieldName = fieldName.length > 190 ? fieldName.substring(0, 190) : fieldName;
-    const mapping = template.mappings.find((m) => m.pdf_field_name === dbFieldName);
-    const systemKey = mapping ? mapping.system_field_path : null;
-
-    let value = '';
-    if (systemKey) {
-      value = formData[systemKey] || '';
-    }
-    if (!value) {
-      value = autoMapFieldName(fieldName);
-      if (value) {
-        value = formData[value] || '';
-      }
-    }
-    if (!value) {
-      const cleanName = getCleanFieldName(fieldName);
-      value = formData[cleanName] || '';
-    }
-    if (!value) {
-      value = formData[fieldName] || '';
-    }
-
+  // Draw overlays on template pages using coordinate mappings
+  const pages = pdfDoc.getPages();
+  for (const mapping of template.mappings) {
+    let coords = null;
     try {
-      if (field instanceof PDFTextField) {
-        console.log(`[PDF_GENERATION] Filling text: ${fieldName} -> "${value}"`);
-        field.setText(String(value));
-      } else if (field instanceof PDFCheckBox) {
-        const lowerVal = String(value).toLowerCase();
-        const isChecked = value === true || lowerVal === 'true' || lowerVal === 'yes' || lowerVal === '1' || lowerVal === 'on';
-        if (isChecked) {
-          console.log(`[PDF_GENERATION] Checking checkbox: ${fieldName}`);
-          field.check();
-        } else {
-          field.uncheck();
-        }
-      }
-    } catch (fieldErr) {
-      console.warn(`[PDF_GENERATION] Failed to fill field "${fieldName}":`, fieldErr.message);
+      coords = JSON.parse(mapping.pdf_field_name);
+    } catch (jsonErr) {
+      console.warn('[PDF_GENERATION] Skipping non-coordinate mapping entry:', mapping.pdf_field_name);
+      continue;
     }
-  }
 
-  try {
-    console.log('[PDF_GENERATION] Updating field appearances...');
-    pdfForm.updateFieldAppearances(helveticaFont);
-  } catch (appErr) {
-    console.warn('[PDF_GENERATION] Failed to update field appearances:', appErr.message);
-  }
+    if (!coords || typeof coords.page !== 'number') {
+      continue;
+    }
 
-  try {
-    console.log('[PDF_GENERATION] Flattening PDF Form...');
-    pdfForm.flatten();
-  } catch (flattenErr) {
-    console.warn('[PDF_GENERATION] Flattening failed (generating editable PDF fallback):', flattenErr.message);
+    const pageIndex = coords.page;
+    if (pageIndex < 0 || pageIndex >= pages.length) {
+      console.warn(`[PDF_GENERATION] Page index ${pageIndex} is out of bounds (total pages: ${pages.length})`);
+      continue;
+    }
+
+    const page = pages[pageIndex];
+    const systemKey = mapping.system_field_path;
+    let value = systemKey ? (formData[systemKey] || '') : '';
+
+    if (value !== undefined && value !== null && value !== '') {
+      // Coordinate Y axis in pdf-lib is from bottom-up.
+      // If the coordinates stored on frontend are top-down (relative to page height),
+      // we can adjust them or draw directly. Let's draw at the parsed coords.
+      const x = parseFloat(coords.x) || 0;
+      const y = parseFloat(coords.y) || 0;
+      const fontSize = parseFloat(coords.fs) || 10;
+
+      const lowerVal = String(value).toLowerCase();
+      const isCheckboxChecked = value === true || lowerVal === 'true' || lowerVal === 'yes' || lowerVal === '1' || lowerVal === 'on';
+
+      if (isCheckboxChecked) {
+        page.drawText('X', {
+          x,
+          y,
+          size: fontSize,
+          font: helveticaFont
+        });
+      } else if (typeof value !== 'boolean') {
+        page.drawText(String(value), {
+          x,
+          y,
+          size: fontSize,
+          font: helveticaFont
+        });
+      }
+    }
   }
 
   const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
@@ -558,26 +535,11 @@ exports.uploadTemplate = async (metaData, file) => {
   const relativePdfPath = path.join('uploads', 'templates', destinationFileName);
   const absolutePdfPath = path.join(process.cwd(), relativePdfPath);
 
-  let pdfFieldNames = [];
   let pdfDoc = null;
 
   try {
     console.log('[PDF_UPLOAD] Validating and parsing uploaded template...');
     pdfDoc = await loadRepairablePdf(file.buffer);
-    
-    let pdfForm = null;
-    try {
-      pdfForm = pdfDoc.getForm();
-    } catch (formErr) {
-      console.warn('[PDF_UPLOAD] Failed to get form objects:', formErr.message);
-    }
-
-    if (!pdfForm || pdfForm.getFields().length === 0) {
-      console.error('[PDF_UPLOAD] Uploaded document has 0 interactive fields.');
-      throw new Error('This PDF template contains zero usable interactive fields (it may be XFA-only or non-interactive). Coordinate-based text overlay is required for this form format.');
-    }
-
-    pdfFieldNames = pdfForm.getFields().map(f => f.getName());
   } catch (err) {
     console.error('[PDF_UPLOAD] Validation failed:', err.message);
     throw err;
@@ -625,77 +587,7 @@ exports.uploadTemplate = async (metaData, file) => {
     }
   });
 
-  // Pre-seed empty mapping records for the parsed field names
-  if (pdfFieldNames.length > 0) {
-    const seenDbFieldNames = new Set();
-    const mappingRecords = [];
-    
-    // Fetch all active custom field definitions at once
-    const allFieldDefs = await prisma.customFieldDefinition.findMany({
-      where: { is_active: true }
-    });
-    const fieldDefMap = new Map(allFieldDefs.map(d => [d.name, d]));
-    
-    const newFieldDefsToCreate = [];
-    const fieldsToProcess = [];
-    
-    for (const fieldName of pdfFieldNames) {
-      const dbFieldName = fieldName.length > 190 ? fieldName.substring(0, 190) : fieldName;
-      if (seenDbFieldNames.has(dbFieldName)) continue;
-      seenDbFieldNames.add(dbFieldName);
-
-      let systemPath = autoMapFieldName(fieldName);
-      if (!systemPath) {
-        const cleanName = getCleanFieldName(fieldName);
-        if (cleanName && cleanName.length > 1) {
-          systemPath = cleanName;
-          if (!fieldDefMap.has(cleanName)) {
-            newFieldDefsToCreate.push({
-              name: cleanName,
-              type: fieldName.toLowerCase().includes('_cb') ? 'checkbox' : 'text',
-              is_active: true
-            });
-            // Add placeholder to prevent duplicates in the same run
-            fieldDefMap.set(cleanName, { name: cleanName });
-          }
-        }
-      }
-      
-      fieldsToProcess.push({ dbFieldName, systemPath });
-    }
-    
-    // Batch create new definitions
-    if (newFieldDefsToCreate.length > 0) {
-      const uniqueNewDefs = [];
-      const seenNames = new Set();
-      for (const def of newFieldDefsToCreate) {
-        if (!seenNames.has(def.name)) {
-          seenNames.add(def.name);
-          uniqueNewDefs.push(def);
-        }
-      }
-      await prisma.customFieldDefinition.createMany({
-        data: uniqueNewDefs,
-        skipDuplicates: true
-      });
-    }
-
-    // Construct mapping records list
-    for (const item of fieldsToProcess) {
-      mappingRecords.push({
-        template_id: template.id,
-        pdf_field_name: item.dbFieldName,
-        system_field_path: item.systemPath || ''
-      });
-    }
-
-    // Batch insert mappings
-    if (mappingRecords.length > 0) {
-      await prisma.courtFormMapping.createMany({
-        data: mappingRecords
-      });
-    }
-  }
+  // No automatic mapping pre-seeding needed for coordinate-based layout. Mappings are drawn visually by the admin.
 
   return this.getTemplateById(template.id);
 };

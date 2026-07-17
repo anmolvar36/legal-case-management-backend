@@ -191,3 +191,38 @@ exports.deleteTemplate = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// GET /api/court-forms/templates/:id/download — Download the original template file
+exports.downloadTemplateOriginal = async (req, res) => {
+  try {
+    const template = await courtFormsService.getTemplateById(req.params.id);
+    if (!template || !template.pdf_path) {
+      return res.status(404).json({ error: 'Template or PDF file not found' });
+    }
+
+    const cleanPdfPath = path.normalize(template.pdf_path).replace(/^(\.\.(\/|\\))+/, '');
+    const absolutePath = path.resolve(process.cwd(), cleanPdfPath);
+    
+    // Path traversal check
+    const templatesDir = path.resolve(process.cwd(), 'uploads', 'templates');
+    const fallbackDir = path.resolve(process.cwd(), 'src', 'modules', 'court-forms', 'templates');
+    
+    const isInUploads = absolutePath.startsWith(`${templatesDir}${path.sep}`);
+    const isInFallback = absolutePath.startsWith(`${fallbackDir}${path.sep}`);
+    
+    if (!isInUploads && !isInFallback) {
+      return res.status(403).json({ error: 'Unauthorized path traversal blocked' });
+    }
+
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({ error: 'Template PDF file not found on server' });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${path.basename(absolutePath)}"`);
+    res.sendFile(absolutePath);
+  } catch (e) {
+    console.error('[COURT_FORMS] Error serving template file:', e.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
