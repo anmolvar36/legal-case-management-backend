@@ -108,7 +108,8 @@ const bulkAction = async (req, res) => {
 
 const getFolderCounts = async (req, res) => {
   try {
-    const counts = await titanEmailService.getFolderCounts(req.user.id);
+    const { accountId } = req.query;
+    const counts = await titanEmailService.getFolderCounts(req.user.id, accountId);
     res.json({ success: true, data: counts });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -117,8 +118,37 @@ const getFolderCounts = async (req, res) => {
 
 const getCustomFolders = async (req, res) => {
   try {
-    const folders = await titanEmailService.getCustomFolders(req.user.id);
+    const { accountId } = req.query;
+    const folders = await titanEmailService.getCustomFolders(req.user.id, accountId);
     res.json({ success: true, data: folders });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getEmailAccounts = async (req, res) => {
+  try {
+    const accounts = await titanEmailService.getEmailAccounts(req.user.id);
+    res.json({ success: true, data: accounts });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const addEmailAccount = async (req, res) => {
+  try {
+    const account = await titanEmailService.addEmailAccount(req.user.id, req.body);
+    res.json({ success: true, data: account });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteEmailAccount = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await titanEmailService.deleteEmailAccount(req.user.id, id);
+    res.json({ success: true, message: 'Account disconnected successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -137,4 +167,8 @@ module.exports = {
   bulkAction,
   getFolderCounts,
   getCustomFolders,
+  getEmailAccounts,
+  addEmailAccount,
+  deleteEmailAccount,
 };
+

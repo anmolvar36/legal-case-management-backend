@@ -39,6 +39,7 @@ class TitanEmailProvider {
         sender_user_id: senderUserId,
         sender_role: senderUser?.role || 'lawyer',
         communication_type: 'titan_email',
+        email_account_id: accountId ? parseInt(accountId, 10) : null,
         folder: 'inbox',
         to: userEmail,
         subject,
@@ -463,7 +464,7 @@ class TitanEmailProvider {
   }
 
   // ── Folder Counts ─────────────────────────────────────
-  async getFolderCounts(userId) {
+  async getFolderCounts(userId, accountId) {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
     const userEmail = user?.email || '';
 
@@ -477,6 +478,10 @@ class TitanEmailProvider {
         is_read: false,
         folder,
       };
+
+      if (accountId) {
+        where.email_account_id = parseInt(accountId, 10);
+      }
 
       if (folder === 'inbox') {
         where.OR = [
@@ -499,53 +504,62 @@ class TitanEmailProvider {
     }
 
     // Starred count
-    counts.starred = await prisma.communication.count({
-      where: {
-        communication_type: 'titan_email',
-        is_deleted: false,
-        is_starred: true,
-        OR: [
-          { sender_user_id: userId },
-          { to: { contains: userEmail } },
-          { cc: { contains: userEmail } },
-          { bcc: { contains: userEmail } },
-        ],
-      },
-    });
+    const starredWhere = {
+      communication_type: 'titan_email',
+      is_deleted: false,
+      is_starred: true,
+      OR: [
+        { sender_user_id: userId },
+        { to: { contains: userEmail } },
+        { cc: { contains: userEmail } },
+        { bcc: { contains: userEmail } },
+      ],
+    };
+    if (accountId) {
+      starredWhere.email_account_id = parseInt(accountId, 10);
+    }
+    counts.starred = await prisma.communication.count({ where: starredWhere });
 
     // Flagged count
-    counts.flagged = await prisma.communication.count({
-      where: {
-        communication_type: 'titan_email',
-        is_deleted: false,
-        is_flagged: true,
-        OR: [
-          { sender_user_id: userId },
-          { to: { contains: userEmail } },
-          { cc: { contains: userEmail } },
-          { bcc: { contains: userEmail } },
-        ],
-      },
-    });
+    const flaggedWhere = {
+      communication_type: 'titan_email',
+      is_deleted: false,
+      is_flagged: true,
+      OR: [
+        { sender_user_id: userId },
+        { to: { contains: userEmail } },
+        { cc: { contains: userEmail } },
+        { bcc: { contains: userEmail } },
+      ],
+    };
+    if (accountId) {
+      flaggedWhere.email_account_id = parseInt(accountId, 10);
+    }
+    counts.flagged = await prisma.communication.count({ where: flaggedWhere });
 
     return counts;
   }
 
-  async getCustomFolders(userId) {
+  async getCustomFolders(userId, accountId) {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
     const userEmail = user?.email || '';
 
+    const where = {
+      communication_type: 'titan_email',
+      is_deleted: false,
+      OR: [
+        { sender_user_id: userId },
+        { to: { contains: userEmail } },
+        { cc: { contains: userEmail } },
+        { bcc: { contains: userEmail } }
+      ]
+    };
+    if (accountId) {
+      where.email_account_id = parseInt(accountId, 10);
+    }
+
     const comms = await prisma.communication.findMany({
-      where: {
-        communication_type: 'titan_email',
-        is_deleted: false,
-        OR: [
-          { sender_user_id: userId },
-          { to: { contains: userEmail } },
-          { cc: { contains: userEmail } },
-          { bcc: { contains: userEmail } }
-        ]
-      },
+      where,
       select: { folder: true }
     });
 
@@ -558,6 +572,39 @@ class TitanEmailProvider {
     });
 
     return Array.from(customFolders);
+  }
+
+  async getEmailAccounts(userId) {
+    return await prisma.emailAccount.findMany({
+      where: { user_id: userId, provider: 'titan' },
+      orderBy: { created_at: 'desc' }
+    });
+  }
+
+  async addEmailAccount(userId, data) {
+    return await prisma.emailAccount.create({
+      data: {
+        user_id: userId,
+        provider: 'titan',
+        email_address: data.email_address,
+        smtp_host: data.smtp_host || 'smtp.titan.email',
+        smtp_port: data.smtp_port ? parseInt(data.smtp_port, 10) : 465,
+        imap_host: data.imap_host || 'imap.titan.email',
+        imap_port: data.imap_port ? parseInt(data.imap_port, 10) : 993,
+        username: data.username || data.email_address,
+        password: data.password || '',
+        sync_status: 'connected',
+      }
+    });
+  }
+
+  async deleteEmailAccount(userId, accountId) {
+    return await prisma.emailAccount.deleteMany({
+      where: {
+        id: parseInt(accountId, 10),
+        user_id: userId
+      }
+    });
   }
 }
 
