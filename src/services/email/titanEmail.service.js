@@ -348,8 +348,12 @@ class TitanEmailProvider {
     switch (action) {
       case 'delete':
         await prisma.communication.updateMany({
-          where: { id: { in: ids } },
+          where: { id: { in: ids }, NOT: { folder: 'trash' } },
           data: { folder: 'trash' },
+        });
+        await prisma.communication.updateMany({
+          where: { id: { in: ids }, folder: 'trash' },
+          data: { is_deleted: true },
         });
         break;
       case 'permanent_delete':
