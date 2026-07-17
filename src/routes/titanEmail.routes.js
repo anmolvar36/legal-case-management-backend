@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const titanEmailController = require('../controllers/titanEmail.controller');
-const { verifyToken } = require('../middlewares/auth');
+const { protect } = require('../middlewares/auth.middleware');
 
-router.use(verifyToken);
+router.use(protect);
 
 router.post('/sync', titanEmailController.syncAccount);
 router.get('/messages', titanEmailController.getMessages);
