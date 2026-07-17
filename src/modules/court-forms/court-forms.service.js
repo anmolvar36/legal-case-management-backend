@@ -262,8 +262,9 @@ exports.generatePdf = async (draftId) => {
     pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage([612, 792]);
     const { height } = page.getSize();
-    const font = await pdfDoc.embedStandardFont('Helvetica');
-    const boldFont = await pdfDoc.embedStandardFont('Helvetica-Bold');
+    const { StandardFonts } = require('pdf-lib');
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
     page.drawText(`${template.form_number} — ${template.title}`, {
       x: 50, y: height - 60, size: 16, font: boldFont,
