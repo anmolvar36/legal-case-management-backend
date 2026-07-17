@@ -1,5 +1,22 @@
 const { PDFDocument, StandardFonts } = require('pdf-lib');
 
+function sanitizeWinAnsiString(str) {
+  if (typeof str !== 'string') return '';
+  let clean = str
+    .replace(/[\u2018\u2019]/g, "'") // curly single quotes
+    .replace(/[\u201C\u201D]/g, '"') // curly double quotes
+    .replace(/[\u2013\u2014]/g, '-') // dashes
+    .replace(/\uFFFD/g, '');         // replacement character 
+    
+  return clean.split('').map(char => {
+    const code = char.charCodeAt(0);
+    if (code >= 32 && code <= 255) {
+      return char;
+    }
+    return '';
+  }).join('');
+}
+
 /**
  * Draws text overlays on a PDF document based on coordinates mapping configuration.
  * @param {Buffer} buffer - original PDF bytes
@@ -40,7 +57,8 @@ async function fillCoordinates(buffer, mappingsList, fieldValuesMap) {
             font: helveticaFont
           });
         } else if (typeof value !== 'boolean') {
-          page.drawText(String(value), {
+          const sanitizedValue = sanitizeWinAnsiString(String(value));
+          page.drawText(sanitizedValue, {
             x,
             y,
             size: fontSize,

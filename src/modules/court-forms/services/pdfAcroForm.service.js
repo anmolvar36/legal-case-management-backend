@@ -17,6 +17,23 @@ async function extractFields(buffer) {
   }
 }
 
+function sanitizeWinAnsiString(str) {
+  if (typeof str !== 'string') return '';
+  let clean = str
+    .replace(/[\u2018\u2019]/g, "'") // curly single quotes
+    .replace(/[\u201C\u201D]/g, '"') // curly double quotes
+    .replace(/[\u2013\u2014]/g, '-') // dashes
+    .replace(/\uFFFD/g, '');         // replacement character 
+    
+  return clean.split('').map(char => {
+    const code = char.charCodeAt(0);
+    if (code >= 32 && code <= 255) {
+      return char;
+    }
+    return '';
+  }).join('');
+}
+
 /**
  * Fills field values in an AcroForm PDF buffer.
  * @param {Buffer} buffer
@@ -34,7 +51,8 @@ async function fillFields(buffer, fieldValuesMap) {
         if (field) {
           const type = field.constructor.name;
           if (type === 'PDFTextField') {
-            field.setText(String(val || ''));
+            const sanitizedValue = sanitizeWinAnsiString(String(val || ''));
+            field.setText(sanitizedValue);
           } else if (type === 'PDFCheckBox') {
             const isTrue = val === true || String(val).toLowerCase() === 'true' || String(val).toLowerCase() === 'yes';
             if (isTrue) {
