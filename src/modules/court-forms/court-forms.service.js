@@ -341,13 +341,56 @@ exports.uploadTemplate = async (metaData, file) => {
     }
   });
 
+function autoMapFieldName(fieldName) {
+  const lower = fieldName.toLowerCase();
+  
+  if (lower.includes('casenumber') || lower.includes('case_number') || (lower.includes('case') && lower.includes('no'))) return 'case_number';
+  if (lower.includes('casetitle') || lower.includes('casename') || (lower.includes('case') && lower.includes('title')) || (lower.includes('case') && lower.includes('name'))) return 'case_title';
+  if (lower.includes('judgename') || lower.includes('judge') || lower.includes('dept')) return 'judge_name';
+  
+  // Attorney / Firm
+  if (lower.includes('attypartyinfo') && lower.includes('name')) return 'attorney_name';
+  if (lower.includes('attorneyname') || lower.includes('attyname') || lower.includes('lawyername')) return 'attorney_name';
+  
+  if (lower.includes('attypartyinfo') && lower.includes('email')) return 'attorney_email';
+  if (lower.includes('attorneyemail') || lower.includes('attyemail') || lower.includes('lawyeremail')) return 'attorney_email';
+  
+  if (lower.includes('attyfirm') || lower.includes('firmname') || lower.includes('firm_name')) return 'firm_name';
+  
+  if (lower.includes('attypartyinfo') && (lower.includes('street') || lower.includes('city') || lower.includes('address') || lower.includes('state') || lower.includes('zip'))) return 'firm_address';
+  if (lower.includes('firmaddress') || lower.includes('firm_address')) return 'firm_address';
+  
+  if (lower.includes('attypartyinfo') && (lower.includes('phone') || lower.includes('telephone') || lower.includes('telno'))) return 'firm_phone';
+  if (lower.includes('firmphone') || lower.includes('firm_phone')) return 'firm_phone';
+  
+  // Parties
+  if (lower.includes('plaintiff') || lower.includes('petitioner') || lower.includes('pltf')) return 'plaintiff';
+  if (lower.includes('defendant') || lower.includes('respondent') || lower.includes('deft')) return 'defendant';
+  
+  // Client details
+  if (lower.includes('clientname') || lower.includes('client_name')) return 'client_name';
+  if (lower.includes('clientemail') || lower.includes('client_email')) return 'client_email';
+  if (lower.includes('clientphone') || lower.includes('client_phone')) return 'client_phone';
+  if (lower.includes('clientaddress') || lower.includes('client_address')) return 'client_address';
+  
+  // Court
+  if (lower.includes('courtname') || lower.includes('court_name') || lower.includes('superiorcourt')) return 'court_name';
+  if (lower.includes('courtaddress') || lower.includes('court_address')) return 'court_address';
+  
+  // Dates
+  if (lower.includes('filingdate') || lower.includes('filing_date')) return 'filing_date';
+  if (lower.includes('hearingdate') || lower.includes('hearing_date')) return 'hearing_date';
+  
+  return '';
+}
+
   // Pre-seed empty mapping records for the parsed field names
   if (pdfFieldNames.length > 0) {
     await prisma.courtFormMapping.createMany({
       data: pdfFieldNames.map(fieldName => ({
         template_id: template.id,
         pdf_field_name: fieldName,
-        system_field_path: ''
+        system_field_path: autoMapFieldName(fieldName)
       }))
     });
   }
