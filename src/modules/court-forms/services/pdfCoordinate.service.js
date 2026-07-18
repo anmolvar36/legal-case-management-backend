@@ -69,7 +69,7 @@ async function fillCoordinates(buffer, mappingsList, fieldValuesMap) {
       }
     }
 
-    const pdfBytes = await pdfDoc.save();
+    const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
     return Buffer.from(pdfBytes);
   } catch (err) {
     console.error('[PDF_COORDINATE] Error filling coordinates on PDF:', err.message);

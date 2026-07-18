@@ -193,7 +193,7 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
       }
     }
 
-    const pdfBytes = await pdfDoc.save();
+    const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
     console.log(`[PDF_ACROFORM_RUNTIME] Total Filled Fields: ${filledCount} | Saved Output PDF Byte Length: ${pdfBytes.length} bytes`);
     return Buffer.from(pdfBytes);
   } catch (err) {

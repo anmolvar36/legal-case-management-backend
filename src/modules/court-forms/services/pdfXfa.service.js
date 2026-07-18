@@ -73,7 +73,7 @@ async function fillXfaDataset(buffer, formData = {}) {
 
     datasetsStream.contents = Buffer.from(xmlContent, 'utf8');
 
-    const updatedPdfBytes = await pdfDoc.save();
+    const updatedPdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
     console.log('[PDF_XFA] Successfully populated XFA XML dataset stream!');
     return Buffer.from(updatedPdfBytes);
   } catch (err) {
