@@ -338,20 +338,30 @@ exports.generatePdf = async (draftIdRaw) => {
   const templatesDirectory = path.resolve(process.cwd(), 'uploads', 'templates');
   const fallbackDirectory = path.resolve(process.cwd(), 'src', 'modules', 'court-forms', 'templates');
   const normalizedPdfPath = template.pdf_path.replace(/\\/g, '/');
-  const pdfAbsolutePath = path.resolve(process.cwd(), normalizedPdfPath);
+  let masterPath = path.resolve(process.cwd(), normalizedPdfPath);
 
-  const isInUploads = pdfAbsolutePath.startsWith(`${templatesDirectory}${path.sep}`) || pdfAbsolutePath === templatesDirectory;
-  const isInFallback = pdfAbsolutePath.startsWith(`${fallbackDirectory}${path.sep}`) || pdfAbsolutePath === fallbackDirectory;
+  if (!fsSync.existsSync(masterPath)) {
+    const filenameOnly = path.basename(normalizedPdfPath);
+    const inUploads = path.join(templatesDirectory, filenameOnly);
+    const inFallback = path.join(fallbackDirectory, filenameOnly);
+
+    if (fsSync.existsSync(inUploads)) {
+      masterPath = inUploads;
+    } else if (fsSync.existsSync(inFallback)) {
+      masterPath = inFallback;
+    }
+  }
+
+  const isInUploads = masterPath.startsWith(`${templatesDirectory}${path.sep}`) || masterPath === templatesDirectory;
+  const isInFallback = masterPath.startsWith(`${fallbackDirectory}${path.sep}`) || masterPath === fallbackDirectory;
 
   if (!isInUploads && !isInFallback) {
     throw new Error('Unauthorized path traversal detected');
   }
 
-  const masterPath = pdfAbsolutePath;
-
   console.log('[PDF_GENERATION] Loading PDF file from:', masterPath);
   if (!fsSync.existsSync(masterPath)) {
-    throw new Error('Template PDF file not found on server filesystem');
+    throw new Error(`Template PDF file not found on server filesystem (${template.pdf_path})`);
   }
 
   const existingPdfBytes = await fs.readFile(masterPath);
