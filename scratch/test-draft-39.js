@@ -1,27 +1,30 @@
-const courtFormsService = require('../src/modules/court-forms/court-forms.service');
-const prisma = require('../src/config/db');
+const { PDFDocument, PDFName } = require('pdf-lib');
+const fs = require('fs');
+const path = require('path');
 
-async function testDraft() {
+async function testDecryption() {
   try {
-    console.log('Testing generatePdf(40)...');
-    const form = await prisma.generatedForm.findUnique({
-      where: { id: 40 },
-      include: {
-        template: { include: { mappings: true } },
-        matter: true,
-      },
-    });
-    console.log('Form 40 found, template ID:', form?.template?.id, 'form_number:', form?.template?.form_number);
-    console.log('Form data keys:', Object.keys(form?.form_data || {}));
-    console.log('Form data values:', JSON.stringify(form?.form_data, null, 2));
+    const masterPath = path.join(process.cwd(), 'uploads', 'templates', 'CIV-010-TEST_1784288051780.pdf');
+    const existingPdfBytes = fs.readFileSync(masterPath);
 
-    const result = await courtFormsService.generatePdf(40);
-    console.log('Success! Result file:', result.fileName);
+    console.log('Loading master PDF with ignoreEncryption: true...');
+    const pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
+
+    console.log('Trailer info before:', pdfDoc.context.trailerInfo);
+    if (pdfDoc.context.trailerInfo.Encrypt) {
+      console.log('Encrypt key found in trailerInfo! Removing it...');
+      delete pdfDoc.context.trailerInfo.Encrypt;
+    }
+
+    const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
+    console.log('Saved PDF size:', pdfBytes.length, 'bytes');
+
+    console.log('Attempting to reload saved PDF without ignoreEncryption...');
+    const reloaded = await PDFDocument.load(pdfBytes);
+    console.log('RELOAD SUCCESSFUL! Page count:', reloaded.getPageCount());
   } catch (err) {
-    console.error('ERROR during generatePdf(40):', err);
-  } finally {
-    await prisma.$disconnect();
+    console.error('Test Decryption ERROR:', err);
   }
 }
 
-testDraft();
+testDecryption();

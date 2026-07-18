@@ -44,6 +44,9 @@ function sanitizeWinAnsiString(str) {
 async function fillFields(buffer, fieldValuesMap) {
   try {
     const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+    if (pdfDoc.context && pdfDoc.context.trailerInfo && pdfDoc.context.trailerInfo.Encrypt) {
+      delete pdfDoc.context.trailerInfo.Encrypt;
+    }
     const form = pdfDoc.getForm();
     
     for (const [fieldName, val] of Object.entries(fieldValuesMap)) {

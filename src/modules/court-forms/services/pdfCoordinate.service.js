@@ -28,6 +28,9 @@ function sanitizeWinAnsiString(str) {
 async function fillCoordinates(buffer, mappingsList, fieldValuesMap) {
   try {
     const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+    if (pdfDoc.context && pdfDoc.context.trailerInfo && pdfDoc.context.trailerInfo.Encrypt) {
+      delete pdfDoc.context.trailerInfo.Encrypt;
+    }
     const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const pages = pdfDoc.getPages();
 
