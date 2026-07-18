@@ -1,6 +1,7 @@
 const courtFormsService = require('./court-forms.service');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 // GET /api/court-forms/templates
 exports.getTemplates = async (req, res) => {
@@ -104,16 +105,23 @@ exports.generatePdf = async (req, res) => {
     }
     const { fileName, filePath, pdfBytes } = await courtFormsService.generatePdf(req.params.id, req.body);
     const buffer = Buffer.from(pdfBytes);
-    const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+    let sha256 = '';
+    try {
+      if (crypto && typeof crypto.createHash === 'function') {
+        sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+      }
+    } catch (hashErr) {
+      console.warn('[CONTROLLER_STREAM_LOG] Hash calculation skipped:', hashErr.message);
+    }
 
     console.log(`[CONTROLLER_STREAM_LOG] Absolute Disk Path: "${filePath}"`);
     console.log(`[CONTROLLER_STREAM_LOG] Stream Filename: "${fileName}"`);
     console.log(`[CONTROLLER_STREAM_LOG] Buffer Byte Length: ${buffer.length} bytes`);
-    console.log(`[CONTROLLER_STREAM_LOG] SHA256 Hash: ${sha256}`);
+    if (sha256) console.log(`[CONTROLLER_STREAM_LOG] SHA256 Hash: ${sha256}`);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('X-PDF-SHA256', sha256);
+    if (sha256) res.setHeader('X-PDF-SHA256', sha256);
     res.setHeader('X-PDF-Byte-Length', String(buffer.length));
     res.end(buffer);
   } catch (e) {
