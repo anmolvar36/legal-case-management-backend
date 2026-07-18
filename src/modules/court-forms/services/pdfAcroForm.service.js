@@ -180,6 +180,37 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
           }
         }
 
+        if (type === 'PDFButton') {
+          const lowerName = fName.toLowerCase();
+          const widgets = field.acroField.getWidgets();
+          let actionDict = null;
+
+          if (lowerName.includes('print')) {
+            actionDict = pdfDoc.context.obj({
+              S: 'JavaScript',
+              JS: 'print();'
+            });
+            console.log(`[PDF_ACROFORM_RUNTIME] Configured Print Action for Button "${fName}"`);
+          } else if (lowerName.includes('save')) {
+            actionDict = pdfDoc.context.obj({
+              S: 'JavaScript',
+              JS: 'app.execMenuItem("SaveAs");'
+            });
+            console.log(`[PDF_ACROFORM_RUNTIME] Configured Save Action for Button "${fName}"`);
+          } else if (lowerName.includes('reset') || lowerName.includes('clear')) {
+            actionDict = pdfDoc.context.obj({
+              S: 'ResetForm'
+            });
+            console.log(`[PDF_ACROFORM_RUNTIME] Configured Reset/Clear Action for Button "${fName}"`);
+          }
+
+          if (actionDict) {
+            widgets.forEach(widget => {
+              widget.dict.set(PDFName.of('A'), actionDict);
+            });
+          }
+        }
+
         if (valueToFill !== undefined && valueToFill !== null && valueToFill !== '') {
           if (type === 'PDFTextField') {
             const sanitizedValue = sanitizeWinAnsiString(valueToFill);
