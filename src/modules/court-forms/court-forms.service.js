@@ -2,6 +2,7 @@ const prisma = require('../../config/db');
 const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
+const https = require('https');
 const { spawn } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
@@ -369,7 +370,44 @@ exports.generatePdf = async (draftIdRaw, overrides = {}) => {
     throw new Error('Unauthorized path traversal detected');
   }
 
+function downloadFileHelper(url, dest) {
+  return new Promise((resolve, reject) => {
+    const file = fsSync.createWriteStream(dest);
+    https.get(url, (response) => {
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        return downloadFileHelper(response.headers.location, dest).then(resolve).catch(reject);
+      }
+      if (response.statusCode !== 200) {
+        return reject(new Error(`HTTP ${response.statusCode}`));
+      }
+      response.pipe(file);
+      file.on('finish', () => file.close(() => resolve()));
+    }).on('error', (err) => {
+      fsSync.unlink(dest, () => reject(err));
+    });
+  });
+}
+
   console.log('[PDF_GENERATION] Loading PDF file from:', masterPath);
+  if (!fsSync.existsSync(masterPath)) {
+    const formNo = template.form_number || '';
+    const cleanFormNo = formNo.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanFormNo) {
+      const officialUrl = `https://www.courts.ca.gov/documents/${cleanFormNo}.pdf`;
+      console.log(`[PDF_GENERATION] Master PDF missing at ${masterPath}. Attempting dynamic download from ${officialUrl}...`);
+      try {
+        const parentDir = path.dirname(masterPath);
+        if (!fsSync.existsSync(parentDir)) {
+          await fs.mkdir(parentDir, { recursive: true });
+        }
+        await downloadFileHelper(officialUrl, masterPath);
+        console.log(`[PDF_GENERATION] Successfully downloaded official template for ${formNo} to ${masterPath}`);
+      } catch (dlErr) {
+        console.error(`[PDF_GENERATION] Dynamic template download failed:`, dlErr.message);
+      }
+    }
+  }
+
   if (!fsSync.existsSync(masterPath)) {
     throw new Error(`Template PDF file not found on server filesystem (${template.pdf_path})`);
   }
@@ -391,23 +429,6 @@ exports.generatePdf = async (draftIdRaw, overrides = {}) => {
   // 1. Analyze PDF Type
   const analysis = await pdfAnalyzer.analyzePdf(existingPdfBytes);
   console.log(`[PDF_GENERATION] Analyzed PDF template type: ${analysis.type}`);
-
-  // On-demand auto extraction if metadata cache is missing for this template version
-  if (!template.mappings || template.mappings.length === 0) {
-    try {
-      await extractAndCacheTemplateMetadata(template.id, existingPdfBytes);
-      const reloadedTemplate = await prisma.courtFormTemplate.findUnique({
-        where: { id: template.id },
-        include: { mappings: true, field_mappings: true }
-      });
-      if (reloadedTemplate && reloadedTemplate.mappings) {
-        template.mappings = reloadedTemplate.mappings;
-        template.field_mappings = reloadedTemplate.field_mappings;
-      }
-    } catch (cacheErr) {
-      console.warn('[PDF_GENERATION] On-demand metadata extraction notice:', cacheErr.message);
-    }
-  }
 
   const DEFAULT_JUDICIAL_COUNCIL_MAPPINGS = [
     { page_number: 0, system_field_path: 'attorney_name', x_position: 45, y_position: 742, font_size: 9 },
@@ -452,9 +473,9 @@ exports.generatePdf = async (draftIdRaw, overrides = {}) => {
   // We only apply coordinate overlays if custom mappings are explicitly defined in the database
   // or if the template has no native AcroForm/XFA fields.
   const hasAcroFields = analysis.type === 'AcroForm' || analysis.type === 'XFA';
-  const coordMappings = hasAcroFields
-    ? []
-    : (template.field_mappings && template.field_mappings.length > 0 ? template.field_mappings : DEFAULT_JUDICIAL_COUNCIL_MAPPINGS);
+  const coordMappings = (template.field_mappings && template.field_mappings.length > 0)
+    ? template.field_mappings
+    : (hasAcroFields ? [] : DEFAULT_JUDICIAL_COUNCIL_MAPPINGS);
 
   console.log(`[PDF_GENERATION] Applying visual text overlay for ${coordMappings.length} fields`);
   try {
@@ -577,300 +598,41 @@ exports.saveMappings = async (templateId, mappings) => {
 };
 
 function autoMapFieldName(fieldName) {
-  if (!fieldName) return '';
-  const normalized = fieldName
-    .replace(/\[\d+\]/g, '')
-    .replace(/[_.\-\/]/g, ' ')
-    .toLowerCase()
-    .trim();
-
-  // 1. Case Number variations
-  if (
-    normalized.includes('casenumber') ||
-    normalized.includes('case number') ||
-    normalized.includes('case no') ||
-    normalized.includes('caseno') ||
-    normalized.includes('csn') ||
-    (normalized.includes('case') && (normalized.includes('num') || normalized.includes('no')))
-  ) {
-    return 'case_number';
-  }
-
-  // 2. Case Title / Name variations
-  if (
-    normalized.includes('casetitle') ||
-    normalized.includes('case title') ||
-    normalized.includes('casename') ||
-    normalized.includes('case name') ||
-    (normalized.includes('case') && normalized.includes('title'))
-  ) {
-    return 'case_title';
-  }
-
-  // 3. State Bar Number variations
-  if (
-    normalized.includes('bar no') ||
-    normalized.includes('barno') ||
-    normalized.includes('attybarno') ||
-    normalized.includes('state bar') ||
-    normalized.includes('bar_number') ||
-    normalized.includes('barnumber')
-  ) {
-    return 'Atty Bar No';
-  }
-
-  // 4. Combined Attorney Box (for forms like SUBP-010 that don't have separate Name/Address fields)
-  if (
-    normalized.includes('textfield1') ||
-    normalized.includes('attynameandaddress') ||
-    (normalized.includes('attypartyinfo') && (normalized.includes('street') || normalized.includes('box')))
-  ) {
-    return 'attorney_block';
-  }
-
-  // 5. Attorney Name variations
-  if (
-    normalized.includes('attname') ||
-    normalized.includes('attorney name') ||
-    normalized.includes('attyname') ||
-    normalized.includes('lawyer name') ||
-    normalized.includes('partywithoutattorney') ||
-    (normalized.includes('atty') && normalized.includes('name') && !normalized.includes('attyfor'))
-  ) {
-    return 'attorney_name';
-  }
-
-  // 6. Attorney Email variations
-  if (
-    normalized.includes('attorney email') ||
-    normalized.includes('attyemail') ||
-    normalized.includes('lawyeremail') ||
-    (normalized.includes('email') && (normalized.includes('atty') || normalized.includes('attorney')))
-  ) {
-    return 'attorney_email';
-  }
-
-  // 7. Firm Name variations
-  if (
-    normalized.includes('attyfirm') ||
-    normalized.includes('firmname') ||
-    normalized.includes('firm name') ||
-    normalized.includes('lawfirm')
-  ) {
-    return 'firm_name';
-  }
-
-  // 8. Firm / Attorney Address variations
-  if (
-    normalized.includes('firm address') ||
-    normalized.includes('firmaddress') ||
-    (normalized.includes('attypartyinfo') && (normalized.includes('street') || normalized.includes('address') || normalized.includes('addr')))
-  ) {
-    return 'firm_address';
-  }
-
-  // 9. Phone / Telephone Number variations
-  if (
-    normalized.includes('firm phone') ||
-    normalized.includes('firmphone') ||
-    normalized.includes('telephone') ||
-    normalized.includes('phone') ||
-    normalized.includes('telno')
-  ) {
-    return 'firm_phone';
-  }
-
-  // 10. Fax Number variations
-  if (normalized.includes('fax')) {
-    return 'firm_fax';
-  }
-
-  // 11. Attorney For / Client Name
-  if (
-    normalized.includes('attyfor') ||
-    normalized.includes('attorney for') ||
-    normalized.includes('atty for')
-  ) {
-    return 'client_name';
-  }
-
-  // 12. Plaintiff / Petitioner / Party 1 variations
-  if (
-    normalized.includes('party1') ||
-    normalized.includes('party 1') ||
-    normalized.includes('plaintiff') ||
-    normalized.includes('petitioner') ||
-    normalized.includes('pltf')
-  ) {
-    return 'plaintiff';
-  }
-
-  // 13. Defendant / Respondent / Party 2 variations
-  if (
-    normalized.includes('party2') ||
-    normalized.includes('party 2') ||
-    normalized.includes('defendant') ||
-    normalized.includes('respondent') ||
-    normalized.includes('deft')
-  ) {
-    return 'defendant';
-  }
-
-  // 14. Client Name variations
-  if (
-    normalized.includes('clientname') ||
-    normalized.includes('client name') ||
-    normalized.includes('applicant')
-  ) {
-    return 'client_name';
-  }
-
-  // 15. Client Email variations
-  if (normalized.includes('client email') || normalized.includes('clientemail')) {
-    return 'client_email';
-  }
-
-  // 16. Client Phone variations
-  if (normalized.includes('client phone') || normalized.includes('clientphone')) {
-    return 'client_phone';
-  }
-
-  // 17. Client Address variations
-  if (normalized.includes('client address') || normalized.includes('clientaddress')) {
-    return 'client_address';
-  }
-
-  // 18. Court Name variations
-  if (
-    normalized.includes('crtcounty') ||
-    normalized.includes('court county') ||
-    normalized.includes('court name') ||
-    normalized.includes('courtname') ||
-    normalized.includes('superior court') ||
-    normalized.includes('crtbranch')
-  ) {
-    return 'court_name';
-  }
-
-  // 19. Court Address variations
-  if (
-    normalized.includes('crtstreet') ||
-    normalized.includes('crtmailingadd') ||
-    normalized.includes('crtcityzip') ||
-    normalized.includes('court address') ||
-    normalized.includes('courtaddress')
-  ) {
-    return 'court_address';
-  }
-
-  // 20. Judge / Dept variations
-  if (
-    normalized.includes('judge') ||
-    normalized.includes('judgename') ||
-    normalized.includes('judge name') ||
-    normalized.includes('dept')
-  ) {
-    return 'judge_name';
-  }
-
-  // 21. Filing & Hearing Date variations
-  if (normalized.includes('filingdate') || normalized.includes('filing date')) return 'filing_date';
-  if (normalized.includes('hearingdate') || normalized.includes('hearing date')) return 'hearing_date';
-
+  const lower = fieldName.toLowerCase();
+  
+  if (lower.includes('casenumber') || lower.includes('case_number') || (lower.includes('case') && lower.includes('no'))) return 'case_number';
+  if (lower.includes('casetitle') || lower.includes('casename') || (lower.includes('case') && lower.includes('title')) || (lower.includes('case') && lower.includes('name'))) return 'case_title';
+  if (lower.includes('judgename') || lower.includes('judge') || lower.includes('dept')) return 'judge_name';
+  
+  if (lower.includes('attypartyinfo') && lower.includes('name')) return 'attorney_name';
+  if (lower.includes('attorneyname') || lower.includes('attyname') || lower.includes('lawyername')) return 'attorney_name';
+  
+  if (lower.includes('attypartyinfo') && lower.includes('email')) return 'attorney_email';
+  if (lower.includes('attorneyemail') || lower.includes('attyemail') || lower.includes('lawyeremail')) return 'attorney_email';
+  
+  if (lower.includes('attyfirm') || lower.includes('firmname') || lower.includes('firm_name')) return 'firm_name';
+  
+  if (lower.includes('attypartyinfo') && (lower.includes('street') || lower.includes('city') || lower.includes('address') || lower.includes('state') || lower.includes('zip'))) return 'firm_address';
+  if (lower.includes('firmaddress') || lower.includes('firm_address')) return 'firm_address';
+  
+  if (lower.includes('attypartyinfo') && (lower.includes('phone') || lower.includes('telephone') || lower.includes('telno'))) return 'firm_phone';
+  if (lower.includes('firmphone') || lower.includes('firm_phone')) return 'firm_phone';
+  
+  if (lower.includes('plaintiff') || lower.includes('petitioner') || lower.includes('pltf')) return 'plaintiff';
+  if (lower.includes('defendant') || lower.includes('respondent') || lower.includes('deft')) return 'defendant';
+  
+  if (lower.includes('clientname') || lower.includes('client_name')) return 'client_name';
+  if (lower.includes('clientemail') || lower.includes('client_email')) return 'client_email';
+  if (lower.includes('clientphone') || lower.includes('client_phone')) return 'client_phone';
+  if (lower.includes('clientaddress') || lower.includes('client_address')) return 'client_address';
+  
+  if (lower.includes('courtname') || lower.includes('court_name') || lower.includes('superiorcourt')) return 'court_name';
+  if (lower.includes('courtaddress') || lower.includes('court_address')) return 'court_address';
+  
+  if (lower.includes('filingdate') || lower.includes('filing_date')) return 'filing_date';
+  if (lower.includes('hearingdate') || lower.includes('hearing_date')) return 'hearing_date';
+  
   return '';
-}
-
-async function extractAndCacheTemplateMetadata(templateId, pdfBuffer) {
-  const tId = parseInt(templateId, 10);
-  if (isNaN(tId)) return;
-
-  console.log(`[PDF_AUTO_ALIGN] Extracting and caching field metadata for Template ID ${tId}...`);
-  try {
-    const pdfDoc = await loadRepairablePdf(pdfBuffer);
-    const pages = pdfDoc.getPages();
-    const form = pdfDoc.getForm();
-    const fields = form.getFields();
-
-    if (!fields || fields.length === 0) {
-      console.log(`[PDF_AUTO_ALIGN] Template ID ${tId} contains 0 interactive fields (marked as non-fillable PDF).`);
-      return;
-    }
-
-    const fieldMappingsToCreate = [];
-    const coordMappingsToCreate = [];
-
-    fields.forEach(f => {
-      const fieldName = f.getName();
-      const widgets = f.acroField.getWidgets();
-      const autoMappedPath = autoMapFieldName(fieldName);
-
-      if (autoMappedPath) {
-        fieldMappingsToCreate.push({
-          template_id: tId,
-          pdf_field_name: fieldName,
-          system_field_path: autoMappedPath
-        });
-      }
-
-      if (widgets.length > 0) {
-        const widget = widgets[0];
-        const rect = widget.getRectangle();
-        let pageIndex = 0;
-
-        for (let i = 0; i < pages.length; i++) {
-          const page = pages[i];
-          const annots = page.node.Annots();
-          if (annots) {
-            for (let j = 0; j < annots.size(); j++) {
-              const annotRef = annots.get(j);
-              const resolved = pdfDoc.context.lookup(annotRef);
-              if (resolved === widget || resolved === widget.dict || (widget.ref && annotRef.num === widget.ref.num && annotRef.gen === widget.ref.gen)) {
-                pageIndex = i;
-                break;
-              }
-            }
-          }
-          if (pageIndex !== 0) break;
-        }
-
-        coordMappingsToCreate.push({
-          template_id: tId,
-          field_name: fieldName,
-          page_number: pageIndex,
-          x_position: parseFloat(rect.x.toFixed(2)),
-          y_position: parseFloat(rect.y.toFixed(2)),
-          font_size: 10,
-          system_field_path: autoMappedPath || ''
-        });
-      }
-    });
-
-    // Clear old metadata for this template version and save fresh cached metadata
-    await prisma.$transaction([
-      prisma.courtFormMapping.deleteMany({ where: { template_id: tId } }),
-      prisma.courtFormFieldMapping.deleteMany({ where: { template_id: tId } }),
-    ]);
-
-    if (fieldMappingsToCreate.length > 0) {
-      const uniqueFieldMappings = [];
-      const seen = new Set();
-      fieldMappingsToCreate.forEach(m => {
-        if (!seen.has(m.pdf_field_name)) {
-          seen.add(m.pdf_field_name);
-          uniqueFieldMappings.push(m);
-        }
-      });
-      await prisma.courtFormMapping.createMany({ data: uniqueFieldMappings });
-    }
-
-    if (coordMappingsToCreate.length > 0) {
-      await prisma.courtFormFieldMapping.createMany({ data: coordMappingsToCreate });
-    }
-
-    console.log(`[PDF_AUTO_ALIGN] Successfully cached ${fieldMappingsToCreate.length} field mappings and ${coordMappingsToCreate.length} field coordinates for Template ID ${tId}!`);
-  } catch (err) {
-    console.warn(`[PDF_AUTO_ALIGN] Notice extracting template metadata for Template ID ${tId}:`, err.message);
-  }
 }
 
 function getCleanFieldName(pdfFieldName) {
@@ -964,12 +726,7 @@ exports.uploadTemplate = async (metaData, file) => {
     }
   });
 
-  // Extract and cache field metadata for the newly uploaded template version
-  try {
-    await extractAndCacheTemplateMetadata(template.id, file.buffer);
-  } catch (extractErr) {
-    console.warn('[PDF_UPLOAD] Notice during auto metadata extraction:', extractErr.message);
-  }
+  // No automatic mapping pre-seeding needed for coordinate-based layout. Mappings are drawn visually by the admin.
 
   return this.getTemplateById(template.id);
 };
