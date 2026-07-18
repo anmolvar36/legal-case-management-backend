@@ -431,10 +431,13 @@ exports.generatePdf = async (draftIdRaw, overrides = {}) => {
     console.warn('[PDF_GENERATION] AcroForm fill skipped:', acroErr.message);
   }
 
-  // 3. Apply visual text overlay onto page canvas to guarantee immediate visibility in browser PDF viewers
+  // 3. Apply visual text overlay onto page canvas to guarantee immediate visibility in browser PDF viewers.
+  // We only apply coordinate overlays if custom mappings are explicitly defined in the database
+  // or if the template has no native AcroForm/XFA fields.
+  const hasAcroFields = analysis.type === 'AcroForm' || analysis.type === 'XFA';
   const coordMappings = (template.field_mappings && template.field_mappings.length > 0)
     ? template.field_mappings
-    : DEFAULT_JUDICIAL_COUNCIL_MAPPINGS;
+    : (hasAcroFields ? [] : DEFAULT_JUDICIAL_COUNCIL_MAPPINGS);
 
   console.log(`[PDF_GENERATION] Applying visual text overlay for ${coordMappings.length} fields`);
   try {
