@@ -67,7 +67,7 @@ async function fillFields(buffer, fieldValuesMap) {
       }
     }
 
-    const pdfBytes = await pdfDoc.save();
+    const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
     return Buffer.from(pdfBytes);
   } catch (err) {
     console.error('[PDF_ACROFORM] Error filling PDF form:', err.message);

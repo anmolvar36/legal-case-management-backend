@@ -320,7 +320,7 @@ exports.generatePdf = async (draftIdRaw) => {
   const form = await prisma.generatedForm.findUnique({
     where: { id: draftId },
     include: {
-      template: { include: { mappings: true, field_mappings: true } },
+      template: { include: { mappings: true } },
       matter: true,
     },
   });
@@ -388,7 +388,7 @@ exports.generatePdf = async (draftIdRaw) => {
     pdfBytes = await pdfAcroForm.fillFields(existingPdfBytes, fieldValuesMap);
   } else {
     // FLAT or fall back to coordinate mapping
-    pdfBytes = await pdfCoordinate.fillCoordinates(existingPdfBytes, template.field_mappings, formData);
+    pdfBytes = await pdfCoordinate.fillCoordinates(existingPdfBytes, template.mappings || [], formData);
   }
 
   const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
@@ -413,7 +413,7 @@ exports.generatePdf = async (draftIdRaw) => {
 
   // Save generated document into Matter Documents
   try {
-    await prisma.document.create({
+    const newDoc = await prisma.document.create({
       data: {
         file_name: fileName,
         original_name: `${template.form_number}_${template.title}.pdf`,
@@ -426,15 +426,18 @@ exports.generatePdf = async (draftIdRaw) => {
       }
     });
 
-    await prisma.activity.create({
-      data: {
-        matter_id: form.matter_id,
-        entity_type: 'document',
-        action: 'generated',
-        description: `Court form generated: ${fileName}`,
-        actor_user_id: form.created_by,
-      }
-    });
+    if (newDoc?.id) {
+      await prisma.activity.create({
+        data: {
+          matter_id: form.matter_id,
+          entity_type: 'document',
+          entity_id: newDoc.id,
+          action: 'generated',
+          description: `Court form generated: ${fileName}`,
+          actor_user_id: form.created_by,
+        }
+      });
+    }
   } catch (dbErr) {
     console.error('[PDF_GENERATION] Failed to create document / activity entry:', dbErr.message);
   }
