@@ -1,30 +1,27 @@
-const { PDFDocument, PDFName } = require('pdf-lib');
+const courtFormsService = require('../src/modules/court-forms/court-forms.service');
+const prisma = require('../src/config/db');
+const { PDFDocument } = require('pdf-lib');
 const fs = require('fs');
 const path = require('path');
 
-async function testDecryption() {
+async function testFullFlow() {
   try {
-    const masterPath = path.join(process.cwd(), 'uploads', 'templates', 'CIV-010-TEST_1784288051780.pdf');
-    const existingPdfBytes = fs.readFileSync(masterPath);
+    console.log('Testing generatePdf(40) full service flow...');
+    const result = await courtFormsService.generatePdf(40);
+    console.log('Success! Result file:', result.fileName);
 
-    console.log('Loading master PDF with ignoreEncryption: true...');
-    const pdfDoc = await PDFDocument.load(existingPdfBytes, { ignoreEncryption: true });
+    const generatedPath = path.join(process.cwd(), 'uploads', 'generated', result.fileName);
+    const bytes = fs.readFileSync(generatedPath);
+    console.log('Generated PDF size:', bytes.length, 'bytes');
 
-    console.log('Trailer info before:', pdfDoc.context.trailerInfo);
-    if (pdfDoc.context.trailerInfo.Encrypt) {
-      console.log('Encrypt key found in trailerInfo! Removing it...');
-      delete pdfDoc.context.trailerInfo.Encrypt;
-    }
-
-    const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
-    console.log('Saved PDF size:', pdfBytes.length, 'bytes');
-
-    console.log('Attempting to reload saved PDF without ignoreEncryption...');
-    const reloaded = await PDFDocument.load(pdfBytes);
-    console.log('RELOAD SUCCESSFUL! Page count:', reloaded.getPageCount());
+    // Try loading generated PDF with pdf-lib WITHOUT ignoreEncryption
+    const pdfDoc = await PDFDocument.load(bytes);
+    console.log('FULL FLOW SUCCESS! Loaded PDF without ignoreEncryption! Pages:', pdfDoc.getPageCount());
   } catch (err) {
-    console.error('Test Decryption ERROR:', err);
+    console.error('ERROR during testFullFlow:', err);
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
-testDecryption();
+testFullFlow();

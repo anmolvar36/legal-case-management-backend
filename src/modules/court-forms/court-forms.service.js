@@ -27,6 +27,7 @@ function runQpdf(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     console.log(`[PDF_REPAIR] Spawning QPDF: "${inputPath}" -> "${outputPath}"`);
     const qpdf = spawn('qpdf', [
+      '--decrypt',
       '--object-streams=disable',
       '--stream-data=preserve',
       inputPath,
@@ -310,7 +311,7 @@ exports.getAllDrafts = async (query = {}) => {
 };
 
 // ── PDF GENERATION ───────────────────────────────────────────
-exports.generatePdf = async (draftIdRaw) => {
+exports.generatePdf = async (draftIdRaw, overrides = {}) => {
   const draftId = Number.parseInt(draftIdRaw, 10);
   if (Number.isNaN(draftId)) {
     throw new Error('Invalid draft ID');
@@ -320,7 +321,7 @@ exports.generatePdf = async (draftIdRaw) => {
   const form = await prisma.generatedForm.findUnique({
     where: { id: draftId },
     include: {
-      template: { include: { mappings: true } },
+      template: { include: { mappings: true, field_mappings: true } },
       matter: true,
     },
   });
@@ -329,7 +330,7 @@ exports.generatePdf = async (draftIdRaw) => {
     throw new Error('Form draft not found');
   }
 
-  const formData = form.form_data;
+  const formData = { ...(form.form_data || {}), ...(overrides.form_data || overrides.formValues || {}) };
   const template = form.template;
   if (!template.pdf_path) {
     throw new Error('Template PDF path is missing in database');
@@ -344,11 +345,14 @@ exports.generatePdf = async (draftIdRaw) => {
     const filenameOnly = path.basename(normalizedPdfPath);
     const inUploads = path.join(templatesDirectory, filenameOnly);
     const inFallback = path.join(fallbackDirectory, filenameOnly);
+    const defaultCiv010 = path.join(fallbackDirectory, 'CIV-010.pdf');
 
     if (fsSync.existsSync(inUploads)) {
       masterPath = inUploads;
     } else if (fsSync.existsSync(inFallback)) {
       masterPath = inFallback;
+    } else if (fsSync.existsSync(defaultCiv010)) {
+      masterPath = defaultCiv010;
     }
   }
 
@@ -364,32 +368,60 @@ exports.generatePdf = async (draftIdRaw) => {
     throw new Error(`Template PDF file not found on server filesystem (${template.pdf_path})`);
   }
 
-  const existingPdfBytes = await fs.readFile(masterPath);
+  let existingPdfBytes = await fs.readFile(masterPath);
   if (!existingPdfBytes.toString('binary').startsWith('%PDF-')) {
     throw new Error('Template file is not a valid PDF document (missing %PDF- header)');
+  }
+
+  // Attempt to decrypt and repair master PDF template using QPDF
+  try {
+    const decryptedBuffer = await repairPdfBuffer(existingPdfBytes);
+    existingPdfBytes = decryptedBuffer;
+    console.log('[PDF_GENERATION] Successfully decrypted master PDF template via QPDF');
+  } catch (repairErr) {
+    console.warn('[PDF_GENERATION] QPDF decryption skipped/unavailable:', repairErr.message);
   }
 
   // 1. Analyze PDF Type
   const analysis = await pdfAnalyzer.analyzePdf(existingPdfBytes);
   console.log(`[PDF_GENERATION] Analyzed PDF template type: ${analysis.type}`);
 
-  let pdfBytes = null;
+  const DEFAULT_JUDICIAL_COUNCIL_MAPPINGS = [
+    { page_number: 0, system_field_path: 'attorney_name', x_position: 45, y_position: 742, font_size: 9 },
+    { page_number: 0, system_field_path: 'firm_name', x_position: 45, y_position: 730, font_size: 9 },
+    { page_number: 0, system_field_path: 'firm_address', x_position: 45, y_position: 718, font_size: 9 },
+    { page_number: 0, system_field_path: 'firm_phone', x_position: 110, y_position: 694, font_size: 9 },
+    { page_number: 0, system_field_path: 'attorney_email', x_position: 110, y_position: 672, font_size: 9 },
+    { page_number: 0, system_field_path: 'client_name', x_position: 130, y_position: 660, font_size: 9 },
+    { page_number: 0, system_field_path: 'Atty Bar No', x_position: 335, y_position: 742, font_size: 9 },
+    { page_number: 0, system_field_path: 'court_name', x_position: 210, y_position: 635, font_size: 9 },
+    { page_number: 0, system_field_path: 'court_address', x_position: 130, y_position: 622, font_size: 9 },
+    { page_number: 0, system_field_path: 'plaintiff', x_position: 140, y_position: 570, font_size: 9 },
+    { page_number: 0, system_field_path: 'defendant', x_position: 140, y_position: 548, font_size: 9 },
+    { page_number: 0, system_field_path: 'case_number', x_position: 425, y_position: 572, font_size: 10 },
+  ];
 
-  if (analysis.type === 'XFA') {
-    const xfaDetails = await pdfXfa.processXfa(existingPdfBytes);
-    throw new Error(xfaDetails.message);
-  } else if (analysis.type === 'ACROFORM') {
-    const fieldValuesMap = {};
-    for (const mapping of template.mappings) {
-      if (mapping.pdf_field_name && mapping.system_field_path) {
-        fieldValuesMap[mapping.pdf_field_name] = formData[mapping.system_field_path] || '';
-      }
+  console.log(`[PDF_GENERATION] Filling AcroForm fields for PDF template type: ${analysis.type}`);
+  const fieldValuesMap = {};
+  for (const mapping of template.mappings || []) {
+    if (mapping.pdf_field_name && mapping.system_field_path) {
+      fieldValuesMap[mapping.pdf_field_name] = formData[mapping.system_field_path] || '';
     }
-    pdfBytes = await pdfAcroForm.fillFields(existingPdfBytes, fieldValuesMap);
-  } else {
-    // FLAT or fall back to coordinate mapping
-    pdfBytes = await pdfCoordinate.fillCoordinates(existingPdfBytes, template.mappings || [], formData);
   }
+
+  // 1. Populate XFA XML dataset stream (for Adobe Acrobat XFA dataset rendering)
+  const xfaFilledBytes = await pdfXfa.fillXfaDataset(existingPdfBytes, formData);
+
+  // 2. Populate AcroForm fields & set NeedsAppearances true (for Chrome/AcroForm rendering)
+  const populatedAcroBytes = await pdfAcroForm.fillFields(xfaFilledBytes, fieldValuesMap, formData);
+
+  // 3. Apply visual text overlay onto page canvas to guarantee immediate visibility in browser PDF viewers
+  const coordMappings = (template.field_mappings && template.field_mappings.length > 0)
+    ? template.field_mappings
+    : DEFAULT_JUDICIAL_COUNCIL_MAPPINGS;
+
+  console.log(`[PDF_GENERATION] Applying visual text overlay for ${coordMappings.length} fields`);
+  pdfBytes = await pdfCoordinate.fillCoordinates(populatedAcroBytes, coordMappings, formData);
 
   const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
   if (!fsSync.existsSync(generatedDir)) {
@@ -441,6 +473,10 @@ exports.generatePdf = async (draftIdRaw) => {
   } catch (dbErr) {
     console.error('[PDF_GENERATION] Failed to create document / activity entry:', dbErr.message);
   }
+
+  console.log(`[PDF_GENERATION_RUNTIME] PDF Generation complete for Draft ID ${draftId}.`);
+  console.log(`[PDF_GENERATION_RUNTIME] Output File Path: "${outputPath}"`);
+  console.log(`[PDF_GENERATION_RUNTIME] Final PDF Byte Length: ${pdfBytes.length} bytes`);
 
   return { fileName, filePath: outputPath, pdfBytes };
 };

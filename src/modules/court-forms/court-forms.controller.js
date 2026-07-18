@@ -102,10 +102,20 @@ exports.generatePdf = async (req, res) => {
     if (Number.isNaN(draftId)) {
       return res.status(400).json({ error: 'Invalid draft ID' });
     }
-    const { fileName, pdfBytes } = await courtFormsService.generatePdf(req.params.id);
+    const { fileName, filePath, pdfBytes } = await courtFormsService.generatePdf(req.params.id, req.body);
+    const buffer = Buffer.from(pdfBytes);
+    const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+
+    console.log(`[CONTROLLER_STREAM_LOG] Absolute Disk Path: "${filePath}"`);
+    console.log(`[CONTROLLER_STREAM_LOG] Stream Filename: "${fileName}"`);
+    console.log(`[CONTROLLER_STREAM_LOG] Buffer Byte Length: ${buffer.length} bytes`);
+    console.log(`[CONTROLLER_STREAM_LOG] SHA256 Hash: ${sha256}`);
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.end(Buffer.from(pdfBytes));
+    res.setHeader('X-PDF-SHA256', sha256);
+    res.setHeader('X-PDF-Byte-Length', String(buffer.length));
+    res.end(buffer);
   } catch (e) {
     console.error('[PDF_GENERATION] Error generating PDF:', e.message);
     if (e.message.includes('not found')) {
