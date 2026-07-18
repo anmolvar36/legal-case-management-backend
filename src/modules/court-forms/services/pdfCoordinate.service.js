@@ -1,8 +1,9 @@
 const { PDFDocument, StandardFonts } = require('pdf-lib');
 
 function sanitizeWinAnsiString(str) {
-  if (typeof str !== 'string') return '';
-  let clean = str
+  if (str === null || str === undefined) return '';
+  const valStr = String(str);
+  const clean = valStr
     .replace(/[\u2018\u2019]/g, "'") // curly single quotes
     .replace(/[\u201C\u201D]/g, '"') // curly double quotes
     .replace(/[\u2013\u2014]/g, '-') // dashes
@@ -10,7 +11,7 @@ function sanitizeWinAnsiString(str) {
     
   return clean.split('').map(char => {
     const code = char.charCodeAt(0);
-    if (code >= 32 && code <= 255) {
+    if ((code >= 32 && code <= 255) || code === 10 || code === 13 || code === 9) {
       return char;
     }
     return '';
