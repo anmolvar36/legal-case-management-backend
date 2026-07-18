@@ -6,24 +6,24 @@ const pdfAcroForm = require('../src/modules/court-forms/services/pdfAcroForm.ser
 const pdfCoordinate = require('../src/modules/court-forms/services/pdfCoordinate.service');
 
 async function testStandalone() {
-  const forms = ['SUBP-010.pdf', 'CIV-110.pdf', 'CIV-010.pdf'];
+  const forms = ['SUBP-010.pdf', 'CIV-110.pdf', 'CIV-010.pdf', 'CM-010.pdf'];
   const testFormData = {
-    case_title: 'Immigration Filing Under Humanitarian Expedition',
+    case_title: 'Mohamed Aaron Lamin',
     case_number: 'CIV-2024-001234',
     matter_number: '00013-Aldridge',
-    plaintiff: 'Erika Lillian Aldridge',
+    plaintiff: 'Mohamed Aaron Lamin',
     defendant: 'ABC Corporation',
-    client_name: 'Erika Lillian Aldridge',
-    client_email: 'erikalillianaldridge@placeholder.local',
+    client_name: 'Mohamed Aaron Lamin',
+    client_email: 'mohamedaaronlamin@placeholder.local',
     client_phone: '1234567890',
-    client_address: '123 Client St, Los Angeles, CA',
-    attorney_name: 'Victoria Admin',
-    attorney_email: 'victoria@vktori.com',
+    client_address: '750 San Vincente Blvd, Suite 800 West Hollywood, CA 90069',
+    attorney_name: 'Victoria Tulsidas',
+    attorney_email: 'mohamedaaronlamin@placeholder.local',
     firm_name: 'Victoria Tulsidas',
     firm_phone: '1234567890',
-    firm_address: '750 San Vincente Blvd, Suite 800West Hollywood, CA 90069',
+    firm_address: '750 San Vincente Blvd, Suite 800 West Hollywood, CA 90069',
     court_name: 'Superior Court of California, County of Los Angeles',
-    court_address: '111 N Hill St, Los Angeles, CA 90012',
+    court_address: '750 San Vincente Blvd, Suite 800 West Hollywood, CA 90069',
     'Atty Bar No': '123456',
     bar_number: '123456'
   };
