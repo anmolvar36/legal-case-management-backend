@@ -61,9 +61,23 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
       console.warn('[PDF_ACROFORM] XFA pre-preservation notice:', xfaPreErr.message);
     }
 
-    const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const form = pdfDoc.getForm();
-    const allFields = form.getFields();
+    let helveticaFont = null;
+    try {
+      helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    } catch (fontErr) {
+      console.warn('[PDF_ACROFORM] Font embed notice:', fontErr.message);
+    }
+
+    let form = null;
+    let allFields = [];
+    try {
+      form = pdfDoc.getForm();
+      if (form) {
+        allFields = form.getFields();
+      }
+    } catch (getFormErr) {
+      console.warn('[PDF_ACROFORM] AcroForm form lookup notice:', getFormErr.message);
+    }
 
     // Combined data lookup pool
     const dataPool = { ...formData, ...fieldValuesMap };
@@ -176,11 +190,13 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
     }
 
     // Generate visual appearance streams for all fields in the form
-    try {
-      form.updateFieldAppearances(helveticaFont);
-      console.log('[PDF_ACROFORM_RUNTIME] Successfully updated visual appearance streams for all AcroForm fields!');
-    } catch (appErr) {
-      console.warn('[PDF_ACROFORM_RUNTIME] Notice updating field appearances:', appErr.message);
+    if (form && helveticaFont) {
+      try {
+        form.updateFieldAppearances(helveticaFont);
+        console.log('[PDF_ACROFORM_RUNTIME] Successfully updated visual appearance streams for all AcroForm fields!');
+      } catch (appErr) {
+        console.warn('[PDF_ACROFORM_RUNTIME] Notice updating field appearances:', appErr.message);
+      }
     }
 
     // Force PDF Viewers to generate appearances for all filled AcroForm fields

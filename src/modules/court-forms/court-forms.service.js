@@ -410,10 +410,20 @@ exports.generatePdf = async (draftIdRaw, overrides = {}) => {
   }
 
   // 1. Populate XFA XML dataset stream (for Adobe Acrobat XFA dataset rendering)
-  const xfaFilledBytes = await pdfXfa.fillXfaDataset(existingPdfBytes, formData);
+  let xfaFilledBytes = existingPdfBytes;
+  try {
+    xfaFilledBytes = await pdfXfa.fillXfaDataset(existingPdfBytes, formData);
+  } catch (xfaErr) {
+    console.warn('[PDF_GENERATION] XFA dataset fill skipped:', xfaErr.message);
+  }
 
   // 2. Populate AcroForm fields & set NeedsAppearances true (for Chrome/AcroForm rendering)
-  const populatedAcroBytes = await pdfAcroForm.fillFields(xfaFilledBytes, fieldValuesMap, formData);
+  let populatedAcroBytes = xfaFilledBytes;
+  try {
+    populatedAcroBytes = await pdfAcroForm.fillFields(xfaFilledBytes, fieldValuesMap, formData);
+  } catch (acroErr) {
+    console.warn('[PDF_GENERATION] AcroForm fill skipped:', acroErr.message);
+  }
 
   // 3. Apply visual text overlay onto page canvas to guarantee immediate visibility in browser PDF viewers
   const coordMappings = (template.field_mappings && template.field_mappings.length > 0)
@@ -421,7 +431,12 @@ exports.generatePdf = async (draftIdRaw, overrides = {}) => {
     : DEFAULT_JUDICIAL_COUNCIL_MAPPINGS;
 
   console.log(`[PDF_GENERATION] Applying visual text overlay for ${coordMappings.length} fields`);
-  pdfBytes = await pdfCoordinate.fillCoordinates(populatedAcroBytes, coordMappings, formData);
+  try {
+    pdfBytes = await pdfCoordinate.fillCoordinates(populatedAcroBytes, coordMappings, formData);
+  } catch (coordErr) {
+    console.warn('[PDF_GENERATION] Coordinate overlay skipped:', coordErr.message);
+    pdfBytes = populatedAcroBytes;
+  }
 
   const generatedDir = path.join(process.cwd(), 'uploads', 'generated');
   if (!fsSync.existsSync(generatedDir)) {
