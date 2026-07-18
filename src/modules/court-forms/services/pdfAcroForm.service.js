@@ -83,6 +83,9 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
     const dataPool = { ...formData, ...fieldValuesMap };
     let filledCount = 0;
 
+    const allFieldNames = allFields.map(f => f.getName().toLowerCase());
+    const hasAttyForField = allFieldNames.some(name => name.includes('attyfor'));
+
     console.log(`[PDF_ACROFORM_RUNTIME] Processing ${allFields.length} AcroForm fields...`);
 
     for (const field of allFields) {
@@ -100,36 +103,60 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
           const lowerName = fName.toLowerCase();
 
           // Case Number
-          if (lowerName.includes('case') && (lowerName.includes('number') || lowerName.includes('no') || lowerName.includes('ft'))) {
+          if (lowerName.includes('case') && (lowerName.includes('number') || lowerName.includes('no') || lowerName.includes('ft') || lowerName.includes('caseno'))) {
             valueToFill = dataPool.case_number;
           } 
           // State Bar Number
           else if (lowerName.includes('bar')) {
             valueToFill = dataPool['Atty Bar No'] || dataPool.bar_number;
           } 
-          // Attorney Name
-          else if (lowerName.includes('attname') || lowerName.includes('partywithoutattorney') || (lowerName.includes('atty') && lowerName.includes('name')) || lowerName.includes('attorney') || (lowerName.includes('info') && lowerName.includes('name'))) {
+          // Combined Attorney Box (for forms like SUBP-010 that don't have separate Name/Address fields)
+          else if (lowerName.includes('textfield1') || lowerName.includes('attynameandaddress') || (lowerName.includes('attypartyinfo') && (lowerName.includes('street') || lowerName.includes('addr') || lowerName.includes('box')))) {
+            const parts = [];
+            if (dataPool.attorney_name) {
+              let nameBar = dataPool.attorney_name;
+              if (dataPool.bar_number || dataPool['Atty Bar No']) {
+                nameBar += ` (Bar No. ${dataPool.bar_number || dataPool['Atty Bar No']})`;
+              }
+              parts.push(nameBar);
+            }
+            if (dataPool.firm_name) {
+              parts.push(dataPool.firm_name);
+            }
+            if (dataPool.firm_address) {
+              parts.push(dataPool.firm_address);
+            }
+            if (parts.length > 0) {
+              valueToFill = parts.join('\n');
+            }
+          }
+          // Attorney Name (only if the form has a dedicated AttyFor field, like CIV-110/CIV-010)
+          else if (hasAttyForField && (lowerName.includes('attname') || (lowerName.includes('atty') && lowerName.includes('name')) || lowerName.includes('attorney_name') || lowerName.includes('partywithoutattorney'))) {
             valueToFill = dataPool.attorney_name;
+          } 
+          // Attorney For / Client Name
+          else if (lowerName.includes('attyfor') || lowerName.includes('attorneyfor') || (!hasAttyForField && lowerName.includes('attypartyinfo') && lowerName.includes('name'))) {
+            valueToFill = dataPool.client_name || dataPool.plaintiff;
           } 
           // Firm Name
           else if (lowerName.includes('attyfirm') || lowerName.includes('firm') || lowerName.includes('lawfirm')) {
             valueToFill = dataPool.firm_name;
           } 
           // Firm / Attorney Address - Street
-          else if (lowerName.includes('street') || lowerName.includes('address') || lowerName.includes('addr')) {
+          else if (lowerName.includes('street') || lowerName.includes('address') || lowerName.includes('addr') || lowerName.includes('city') || lowerName.includes('zip') || lowerName.includes('state')) {
             valueToFill = dataPool.firm_address || dataPool.court_address;
           } 
           // Phone / Telephone Number
           else if (lowerName.includes('telephone') || lowerName.includes('phone') || lowerName.includes('tel')) {
             valueToFill = dataPool.firm_phone || dataPool.client_phone;
           } 
+          // Fax
+          else if (lowerName.includes('fax')) {
+            valueToFill = dataPool.firm_fax || dataPool.client_fax || '';
+          }
           // Email Address
           else if (lowerName.includes('email') || lowerName.includes('e-mail')) {
             valueToFill = dataPool.attorney_email || dataPool.client_email;
-          } 
-          // Attorney For / Client Name
-          else if (lowerName.includes('attyfor') || lowerName.includes('attorneyfor')) {
-            valueToFill = dataPool.client_name || dataPool.plaintiff;
           } 
           // Court County / Superior Court Name
           else if (lowerName.includes('crtcounty') || lowerName.includes('county') || lowerName.includes('superiorcourt') || lowerName.includes('courtname') || lowerName.includes('court_name') || lowerName.includes('crtbranch') || lowerName.includes('branch')) {
@@ -209,7 +236,15 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
       }
     }
 
-    const pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
+    let pdfBytes;
+    try {
+      pdfBytes = await pdfDoc.save();
+      console.log('[PDF_ACROFORM_RUNTIME] Successfully saved PDF with default serialization options.');
+    } catch (saveErr) {
+      console.warn('[PDF_ACROFORM_RUNTIME] Failed default save, falling back to updateFieldAppearances: false. Error:', saveErr.message);
+      pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
+    }
+
     console.log(`[PDF_ACROFORM_RUNTIME] Total Filled Fields: ${filledCount} | Saved Output PDF Byte Length: ${pdfBytes.length} bytes`);
     return Buffer.from(pdfBytes);
   } catch (err) {
