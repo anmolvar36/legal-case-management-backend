@@ -343,16 +343,22 @@ exports.generatePdf = async (draftIdRaw, overrides = {}) => {
 
   if (!fsSync.existsSync(masterPath)) {
     const filenameOnly = path.basename(normalizedPdfPath);
+    const formNoClean = template.form_number.replace(/[^a-zA-Z0-9_-]/g, '');
+    const formSpecificName = `${formNoClean}.pdf`;
+
     const inUploads = path.join(templatesDirectory, filenameOnly);
+    const inUploadsByFormNo = path.join(templatesDirectory, formSpecificName);
     const inFallback = path.join(fallbackDirectory, filenameOnly);
-    const defaultCiv010 = path.join(fallbackDirectory, 'CIV-010.pdf');
+    const inFallbackByFormNo = path.join(fallbackDirectory, formSpecificName);
 
     if (fsSync.existsSync(inUploads)) {
       masterPath = inUploads;
+    } else if (fsSync.existsSync(inUploadsByFormNo)) {
+      masterPath = inUploadsByFormNo;
     } else if (fsSync.existsSync(inFallback)) {
       masterPath = inFallback;
-    } else if (fsSync.existsSync(defaultCiv010)) {
-      masterPath = defaultCiv010;
+    } else if (fsSync.existsSync(inFallbackByFormNo)) {
+      masterPath = inFallbackByFormNo;
     }
   }
 
