@@ -74,7 +74,7 @@ async function fillXfaDataset(buffer, formData = {}) {
     datasetsStream.contents = Buffer.from(xmlContent, 'utf8');
 
     const updatedPdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
-    console.log('[PDF_XFA] Successfully populated XFA XML dataset stream!');
+//     console.log('[PDF_XFA] Successfully populated XFA XML dataset stream!');
     return Buffer.from(updatedPdfBytes);
   } catch (err) {
     console.warn('[PDF_XFA] XFA XML dataset population skipped/error:', err.message);

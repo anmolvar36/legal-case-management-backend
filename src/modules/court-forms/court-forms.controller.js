@@ -114,10 +114,10 @@ exports.generatePdf = async (req, res) => {
       console.warn('[CONTROLLER_STREAM_LOG] Hash calculation skipped:', hashErr.message);
     }
 
-    console.log(`[CONTROLLER_STREAM_LOG] Absolute Disk Path: "${filePath}"`);
-    console.log(`[CONTROLLER_STREAM_LOG] Stream Filename: "${fileName}"`);
-    console.log(`[CONTROLLER_STREAM_LOG] Buffer Byte Length: ${buffer.length} bytes`);
-    if (sha256) console.log(`[CONTROLLER_STREAM_LOG] SHA256 Hash: ${sha256}`);
+//     console.log(`[CONTROLLER_STREAM_LOG] Absolute Disk Path: "${filePath}"`);
+//     console.log(`[CONTROLLER_STREAM_LOG] Stream Filename: "${fileName}"`);
+//     console.log(`[CONTROLLER_STREAM_LOG] Buffer Byte Length: ${buffer.length} bytes`);
+//     if (sha256) console.log(`[CONTROLLER_STREAM_LOG] SHA256 Hash: ${sha256}`);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);

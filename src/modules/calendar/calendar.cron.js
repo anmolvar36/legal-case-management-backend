@@ -15,7 +15,7 @@ cron.schedule('*/5 * * * *', async () => {
 
 exports.syncOutlookCalendar = async () => {
   try {
-    console.log('[Calendar Cron] Running Outlook Calendar synchronization...');
+//     console.log('[Calendar Cron] Running Outlook Calendar synchronization...');
     const outlookService = require('./outlook.service');
     
     const connectedUsers = await prisma.user.findMany({
@@ -25,7 +25,7 @@ exports.syncOutlookCalendar = async () => {
       select: { id: true }
     });
 
-    console.log(`[Calendar Cron] Found ${connectedUsers.length} users with active Outlook integration.`);
+//     console.log(`[Calendar Cron] Found ${connectedUsers.length} users with active Outlook integration.`);
     for (const user of connectedUsers) {
       await outlookService.pullChanges(user.id);
     }
@@ -36,7 +36,7 @@ exports.syncOutlookCalendar = async () => {
 
 exports.checkReminders = async () => {
   try {
-    console.log('[Calendar Cron] Running court event reminder check...');
+//     console.log('[Calendar Cron] Running court event reminder check...');
     const now = new Date();
 
     // Fetch all admins

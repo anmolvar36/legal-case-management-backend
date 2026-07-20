@@ -3,7 +3,7 @@ const prisma = require('../../config/db');
 
 // Run every hour
 cron.schedule('0 * * * *', async () => {
-  console.log('[Cron] Running scheduled task check...');
+//   console.log('[Cron] Running scheduled task check...');
   try {
     const now = new Date();
     
@@ -54,7 +54,7 @@ cron.schedule('0 * * * *', async () => {
     // or log to a secondary table. Since the schema only has reminder_sent, 
     // we'll rely on the existing reminder infrastructure to handle the explicit reminder.
     
-    console.log(`[Cron] Processed ${pendingReminders.length} task reminders.`);
+//     console.log(`[Cron] Processed ${pendingReminders.length} task reminders.`);
   } catch (err) {
     console.error('[Cron Error]', err);
   }

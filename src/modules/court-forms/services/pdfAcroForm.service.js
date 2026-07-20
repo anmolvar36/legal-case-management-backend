@@ -46,19 +46,19 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
   try {
     const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
 
-    // Preserve XFA array if present before pdfDoc.getForm()
+    // Remove XFA array if present to prevent double text/ghosting
     let acroFormDict = null;
-    let xfaObj = null;
     try {
       const acroFormRef = pdfDoc.catalog.get(PDFName.of('AcroForm'));
       if (acroFormRef) {
         acroFormDict = pdfDoc.context.lookup(acroFormRef);
-        if (acroFormDict && typeof acroFormDict.get === 'function') {
-          xfaObj = acroFormDict.get(PDFName.of('XFA'));
+        if (acroFormDict && typeof acroFormDict.delete === 'function') {
+          acroFormDict.delete(PDFName.of('XFA'));
+//           console.log('[PDF_ACROFORM_RUNTIME] Successfully deleted XFA dictionary to prevent ghosting.');
         }
       }
     } catch (xfaPreErr) {
-      console.warn('[PDF_ACROFORM] XFA pre-preservation notice:', xfaPreErr.message);
+      console.warn('[PDF_ACROFORM] XFA removal notice:', xfaPreErr.message);
     }
 
     let helveticaFont = null;
@@ -86,7 +86,7 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
     const allFieldNames = allFields.map(f => f.getName().toLowerCase());
     const hasAttyForField = allFieldNames.some(name => name.includes('attyfor'));
 
-    console.log(`[PDF_ACROFORM_RUNTIME] Processing ${allFields.length} AcroForm fields...`);
+//     console.log(`[PDF_ACROFORM_RUNTIME] Processing ${allFields.length} AcroForm fields...`);
 
     for (const field of allFields) {
       try {
@@ -190,18 +190,18 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
               S: 'JavaScript',
               JS: 'print();'
             });
-            console.log(`[PDF_ACROFORM_RUNTIME] Configured Print Action for Button "${fName}"`);
+//             console.log(`[PDF_ACROFORM_RUNTIME] Configured Print Action for Button "${fName}"`);
           } else if (lowerName.includes('save')) {
             actionDict = pdfDoc.context.obj({
               S: 'JavaScript',
               JS: 'app.execMenuItem("SaveAs");'
             });
-            console.log(`[PDF_ACROFORM_RUNTIME] Configured Save Action for Button "${fName}"`);
+//             console.log(`[PDF_ACROFORM_RUNTIME] Configured Save Action for Button "${fName}"`);
           } else if (lowerName.includes('reset') || lowerName.includes('clear')) {
             actionDict = pdfDoc.context.obj({
               S: 'ResetForm'
             });
-            console.log(`[PDF_ACROFORM_RUNTIME] Configured Reset/Clear Action for Button "${fName}"`);
+//             console.log(`[PDF_ACROFORM_RUNTIME] Configured Reset/Clear Action for Button "${fName}"`);
           }
 
           if (actionDict) {
@@ -214,12 +214,17 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
         if (valueToFill !== undefined && valueToFill !== null && valueToFill !== '') {
           if (type === 'PDFTextField') {
             const sanitizedValue = sanitizeWinAnsiString(valueToFill);
+            
+            // Auto-align text perfectly within the bounding box
+            field.setFontSize(0);
+            
+            if (sanitizedValue.includes('\\n')) {
+              field.enableMultiline();
+            }
+            
             field.setText(sanitizedValue);
-            try {
-              field.defaultUpdateAppearances(helveticaFont);
-            } catch (fErr) {}
             filledCount++;
-            console.log(`[PDF_ACROFORM_RUNTIME] Written Field "${fName}" = "${sanitizedValue}"`);
+//             console.log(`[PDF_ACROFORM_RUNTIME] Written Field "${fName}" = "${sanitizedValue}"`);
           } else if (type === 'PDFCheckBox') {
             const isTrue = valueToFill === true || String(valueToFill).toLowerCase() === 'true' || String(valueToFill).toLowerCase() === 'yes';
             if (isTrue) {
@@ -228,14 +233,14 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
               field.uncheck();
             }
             filledCount++;
-            console.log(`[PDF_ACROFORM_RUNTIME] Written CheckBox "${fName}" = ${isTrue}`);
+//             console.log(`[PDF_ACROFORM_RUNTIME] Written CheckBox "${fName}" = ${isTrue}`);
           } else if (type === 'PDFDropdown' || type === 'PDFOptionGroup' || type === 'PDFRadioGroup') {
             try {
               const sanitizedVal = sanitizeWinAnsiString(valueToFill);
               if (sanitizedVal) {
                 field.select(sanitizedVal);
                 filledCount++;
-                console.log(`[PDF_ACROFORM_RUNTIME] Selected Option "${fName}" = "${sanitizedVal}"`);
+//                 console.log(`[PDF_ACROFORM_RUNTIME] Selected Option "${fName}" = "${sanitizedVal}"`);
               }
             } catch (selErr) {
               console.warn(`[PDF_ACROFORM] Select error for ${fName}:`, selErr.message);
@@ -251,17 +256,17 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
     if (form && helveticaFont) {
       try {
         form.updateFieldAppearances(helveticaFont);
-        console.log('[PDF_ACROFORM_RUNTIME] Successfully updated visual appearance streams for all AcroForm fields!');
+//         console.log('[PDF_ACROFORM_RUNTIME] Successfully updated visual appearance streams for all AcroForm fields!');
       } catch (appErr) {
         console.warn('[PDF_ACROFORM_RUNTIME] Notice updating field appearances:', appErr.message);
       }
     }
 
-    // Force PDF Viewers to generate appearances for all filled AcroForm fields
+    // Disable NeedsAppearances to prevent "double text" / ghosting by PDF viewers
     if (acroFormDict && typeof acroFormDict.set === 'function') {
       try {
-        acroFormDict.set(PDFName.of('NeedsAppearances'), pdfDoc.context.obj(true));
-        console.log('[PDF_ACROFORM_RUNTIME] Set /NeedsAppearances true on AcroForm dictionary');
+        acroFormDict.set(PDFName.of('NeedsAppearances'), pdfDoc.context.obj(false));
+//         console.log('[PDF_ACROFORM_RUNTIME] Set /NeedsAppearances false to prevent double text');
       } catch (needsErr) {
         console.warn('[PDF_ACROFORM_RUNTIME] NeedsAppearances setting warning:', needsErr.message);
       }
@@ -270,13 +275,13 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
     let pdfBytes;
     try {
       pdfBytes = await pdfDoc.save();
-      console.log('[PDF_ACROFORM_RUNTIME] Successfully saved PDF with default serialization options.');
+//       console.log('[PDF_ACROFORM_RUNTIME] Successfully saved PDF with default serialization options.');
     } catch (saveErr) {
       console.warn('[PDF_ACROFORM_RUNTIME] Failed default save, falling back to updateFieldAppearances: false. Error:', saveErr.message);
       pdfBytes = await pdfDoc.save({ updateFieldAppearances: false });
     }
 
-    console.log(`[PDF_ACROFORM_RUNTIME] Total Filled Fields: ${filledCount} | Saved Output PDF Byte Length: ${pdfBytes.length} bytes`);
+//     console.log(`[PDF_ACROFORM_RUNTIME] Total Filled Fields: ${filledCount} | Saved Output PDF Byte Length: ${pdfBytes.length} bytes`);
     return Buffer.from(pdfBytes);
   } catch (err) {
     console.error('[PDF_ACROFORM] Error filling PDF form:', err.message);

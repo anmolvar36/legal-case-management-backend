@@ -26,7 +26,7 @@ if (process.platform === 'win32') {
 
 function runQpdf(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    console.log(`[PDF_REPAIR] Spawning QPDF: "${inputPath}" -> "${outputPath}"`);
+//     console.log(`[PDF_REPAIR] Spawning QPDF: "${inputPath}" -> "${outputPath}"`);
     const qpdf = spawn('qpdf', [
       '--decrypt',
       '--object-streams=disable',
@@ -49,7 +49,7 @@ function runQpdf(inputPath, outputPath) {
     });
 
     qpdf.on('close', (code) => {
-      console.log(`[PDF_REPAIR] QPDF exited with code: ${code}`);
+//       console.log(`[PDF_REPAIR] QPDF exited with code: ${code}`);
       if (code === 0 || (code === 3 && fsSync.existsSync(outputPath))) {
         resolve();
       } else if (code === 2) {
@@ -105,7 +105,7 @@ async function loadRepairablePdf(pdfBuffer) {
   let originalErrorMsg = '';
 
   try {
-    console.log('[COURT_FORMS] Attempting to load original PDF buffer...');
+//     console.log('[COURT_FORMS] Attempting to load original PDF buffer...');
     pdfDoc = await PDFDocument.load(pdfBuffer, loadOptions);
     
     let fieldsCount = 0;
@@ -114,7 +114,7 @@ async function loadRepairablePdf(pdfBuffer) {
     } catch (_) {}
     
     if (fieldsCount === 0) {
-      console.log('[COURT_FORMS] Loaded PDF has 0 fields. Attempting QPDF repair to check if fields can be recovered...');
+//       console.log('[COURT_FORMS] Loaded PDF has 0 fields. Attempting QPDF repair to check if fields can be recovered...');
       originallyFailed = true;
       originalErrorMsg = 'Loaded PDF contains 0 fields';
     }
@@ -127,7 +127,7 @@ async function loadRepairablePdf(pdfBuffer) {
   if (originallyFailed) {
     try {
       const repairedBuffer = await repairPdfBuffer(pdfBuffer);
-      console.log('[COURT_FORMS] Attempting to load repaired PDF buffer...');
+//       console.log('[COURT_FORMS] Attempting to load repaired PDF buffer...');
       const repairedDoc = await PDFDocument.load(repairedBuffer, loadOptions);
       return repairedDoc;
     } catch (repairError) {
@@ -318,7 +318,7 @@ exports.generatePdf = async (draftIdRaw, overrides = {}) => {
     throw new Error('Invalid draft ID');
   }
 
-  console.log('[PDF_GENERATION] Starting PDF generation for Draft ID:', draftId);
+//   console.log('[PDF_GENERATION] Starting PDF generation for Draft ID:', draftId);
   const form = await prisma.generatedForm.findUnique({
     where: { id: draftId },
     include: {
@@ -388,20 +388,20 @@ function downloadFileHelper(url, dest) {
   });
 }
 
-  console.log('[PDF_GENERATION] Loading PDF file from:', masterPath);
+//   console.log('[PDF_GENERATION] Loading PDF file from:', masterPath);
   if (!fsSync.existsSync(masterPath)) {
     const formNo = template.form_number || '';
     const cleanFormNo = formNo.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (cleanFormNo) {
       const officialUrl = `https://www.courts.ca.gov/documents/${cleanFormNo}.pdf`;
-      console.log(`[PDF_GENERATION] Master PDF missing at ${masterPath}. Attempting dynamic download from ${officialUrl}...`);
+//       console.log(`[PDF_GENERATION] Master PDF missing at ${masterPath}. Attempting dynamic download from ${officialUrl}...`);
       try {
         const parentDir = path.dirname(masterPath);
         if (!fsSync.existsSync(parentDir)) {
           await fs.mkdir(parentDir, { recursive: true });
         }
         await downloadFileHelper(officialUrl, masterPath);
-        console.log(`[PDF_GENERATION] Successfully downloaded official template for ${formNo} to ${masterPath}`);
+//         console.log(`[PDF_GENERATION] Successfully downloaded official template for ${formNo} to ${masterPath}`);
       } catch (dlErr) {
         console.error(`[PDF_GENERATION] Dynamic template download failed:`, dlErr.message);
       }
@@ -421,14 +421,14 @@ function downloadFileHelper(url, dest) {
   try {
     const decryptedBuffer = await repairPdfBuffer(existingPdfBytes);
     existingPdfBytes = decryptedBuffer;
-    console.log('[PDF_GENERATION] Successfully decrypted master PDF template via QPDF');
+//     console.log('[PDF_GENERATION] Successfully decrypted master PDF template via QPDF');
   } catch (repairErr) {
     console.warn('[PDF_GENERATION] QPDF decryption skipped/unavailable:', repairErr.message);
   }
 
   // 1. Analyze PDF Type
   const analysis = await pdfAnalyzer.analyzePdf(existingPdfBytes);
-  console.log(`[PDF_GENERATION] Analyzed PDF template type: ${analysis.type}`);
+//   console.log(`[PDF_GENERATION] Analyzed PDF template type: ${analysis.type}`);
 
   const DEFAULT_JUDICIAL_COUNCIL_MAPPINGS = [
     { page_number: 0, system_field_path: 'attorney_name', x_position: 45, y_position: 742, font_size: 9 },
@@ -445,7 +445,7 @@ function downloadFileHelper(url, dest) {
     { page_number: 0, system_field_path: 'case_number', x_position: 425, y_position: 572, font_size: 10 },
   ];
 
-  console.log(`[PDF_GENERATION] Filling AcroForm fields for PDF template type: ${analysis.type}`);
+//   console.log(`[PDF_GENERATION] Filling AcroForm fields for PDF template type: ${analysis.type}`);
   const fieldValuesMap = {};
   for (const mapping of template.mappings || []) {
     if (mapping.pdf_field_name && mapping.system_field_path) {
@@ -469,19 +469,22 @@ function downloadFileHelper(url, dest) {
     console.warn('[PDF_GENERATION] AcroForm fill skipped:', acroErr.message);
   }
 
-  // 3. Apply visual text overlay onto page canvas to guarantee immediate visibility in browser PDF viewers.
-  // We only apply coordinate overlays if custom mappings are explicitly defined in the database
-  // or if the template has no native AcroForm/XFA fields.
-  const hasAcroFields = analysis.type === 'AcroForm' || analysis.type === 'XFA';
-  const coordMappings = (template.field_mappings && template.field_mappings.length > 0)
-    ? template.field_mappings
-    : (hasAcroFields ? [] : DEFAULT_JUDICIAL_COUNCIL_MAPPINGS);
+  // 3. Apply visual text overlay onto page canvas ONLY if genuine coordinate mappings exist.
+  // Using hardcoded default coordinates on AcroForms causes overlapping "double text".
+  let coordMappings = [];
+  if (template.field_mappings && template.field_mappings.length > 0 && template.field_mappings[0].x_position !== undefined) {
+    coordMappings = template.field_mappings;
+  }
 
-  console.log(`[PDF_GENERATION] Applying visual text overlay for ${coordMappings.length} fields`);
-  try {
-    pdfBytes = await pdfCoordinate.fillCoordinates(populatedAcroBytes, coordMappings, formData);
-  } catch (coordErr) {
-    console.warn('[PDF_GENERATION] Coordinate overlay skipped:', coordErr.message);
+  if (coordMappings.length > 0) {
+//     console.log(`[PDF_GENERATION] Applying visual text overlay for ${coordMappings.length} fields`);
+    try {
+      pdfBytes = await pdfCoordinate.fillCoordinates(populatedAcroBytes, coordMappings, formData);
+    } catch (coordErr) {
+      console.warn('[PDF_GENERATION] Coordinate overlay skipped:', coordErr.message);
+      pdfBytes = populatedAcroBytes;
+    }
+  } else {
     pdfBytes = populatedAcroBytes;
   }
 
@@ -495,7 +498,7 @@ function downloadFileHelper(url, dest) {
   const outputPath = path.join(generatedDir, fileName);
 
   await fs.writeFile(outputPath, pdfBytes);
-  console.log('[PDF_GENERATION] PDF file written successfully:', outputPath);
+//   console.log('[PDF_GENERATION] PDF file written successfully:', outputPath);
 
   // Update draft form status
   await prisma.generatedForm.update({
@@ -536,9 +539,9 @@ function downloadFileHelper(url, dest) {
     console.error('[PDF_GENERATION] Failed to create document / activity entry:', dbErr.message);
   }
 
-  console.log(`[PDF_GENERATION_RUNTIME] PDF Generation complete for Draft ID ${draftId}.`);
-  console.log(`[PDF_GENERATION_RUNTIME] Output File Path: "${outputPath}"`);
-  console.log(`[PDF_GENERATION_RUNTIME] Final PDF Byte Length: ${pdfBytes.length} bytes`);
+//   console.log(`[PDF_GENERATION_RUNTIME] PDF Generation complete for Draft ID ${draftId}.`);
+//   console.log(`[PDF_GENERATION_RUNTIME] Output File Path: "${outputPath}"`);
+//   console.log(`[PDF_GENERATION_RUNTIME] Final PDF Byte Length: ${pdfBytes.length} bytes`);
 
   return { fileName, filePath: outputPath, pdfBytes };
 };
@@ -677,7 +680,7 @@ exports.uploadTemplate = async (metaData, file) => {
   let pdfDoc = null;
 
   try {
-    console.log('[PDF_UPLOAD] Validating and parsing uploaded template...');
+//     console.log('[PDF_UPLOAD] Validating and parsing uploaded template...');
     pdfDoc = await loadRepairablePdf(file.buffer);
   } catch (err) {
     console.error('[PDF_UPLOAD] Validation failed:', err.message);
@@ -692,7 +695,7 @@ exports.uploadTemplate = async (metaData, file) => {
       updateFieldAppearances: false
     });
     await fs.writeFile(absolutePdfPath, normalizedBytes);
-    console.log('[PDF_UPLOAD] Normalized template written successfully to:', absolutePdfPath);
+//     console.log('[PDF_UPLOAD] Normalized template written successfully to:', absolutePdfPath);
   } catch (saveErr) {
     console.error('[PDF_UPLOAD] Failed to write normalized template:', saveErr.message);
     if (fsSync.existsSync(absolutePdfPath)) {
