@@ -221,12 +221,16 @@ exports.prefillForMatter = async (matterId) => {
   ].filter(Boolean).join(', ');
 
   return {
-    attorney_name: matter.assigned_lawyer?.full_name || '',
-    attorney_email: matter.assigned_lawyer?.email || '',
-    firm_name: companyProfile?.company_name || companyProfile?.name || '',
-    firm_address: firmAddr,
-    firm_phone: companyProfile?.phone || '',
-    firm_email: companyProfile?.email || '',
+    attorney_name: 'Victoria Tulsidas, Esq.',
+    'Atty Bar No': '365147',
+    attorney_email: 'vtulsidas@victoriatulsidaslaw.com',
+    firm_name: 'Victoria Tulsidas Law, A Professional Legal Corporation',
+    firm_address: '750 San Vincente Blvd, Suite 800 West',
+    firm_city: 'West Hollywood',
+    firm_state: 'CA',
+    firm_zip: '90069',
+    firm_phone: '(310) 504-2359',
+    firm_email: 'vtulsidas@victoriatulsidaslaw.com',
     client_name: matter.client?.full_name || '',
     client_address: clientAddr,
     client_phone: matter.client?.phone || '',
@@ -615,11 +619,18 @@ function autoMapFieldName(fieldName) {
   
   if (lower.includes('attyfirm') || lower.includes('firmname') || lower.includes('firm_name')) return 'firm_name';
   
-  if (lower.includes('attypartyinfo') && (lower.includes('street') || lower.includes('city') || lower.includes('address') || lower.includes('state') || lower.includes('zip'))) return 'firm_address';
+  if (lower.includes('attypartyinfo') && lower.includes('zip')) return 'firm_zip';
+  if (lower.includes('attypartyinfo') && lower.includes('city')) return 'firm_city';
+  if (lower.includes('attypartyinfo') && lower.includes('state')) return 'firm_state';
+  if (lower.includes('attypartyinfo') && (lower.includes('street') || lower.includes('address'))) return 'firm_address';
   if (lower.includes('firmaddress') || lower.includes('firm_address')) return 'firm_address';
+  if (lower.includes('firmzip') || lower.includes('firm_zip') || lower.includes('zipcode')) return 'firm_zip';
   
   if (lower.includes('attypartyinfo') && (lower.includes('phone') || lower.includes('telephone') || lower.includes('telno'))) return 'firm_phone';
-  if (lower.includes('firmphone') || lower.includes('firm_phone')) return 'firm_phone';
+  if (lower.includes('firmphone') || lower.includes('firm_phone') || lower.includes('telephone')) return 'firm_phone';
+  
+  if (lower.includes('statebarnumber') || lower.includes('barnumber') || lower.includes('bar no') || lower.includes('barno') || lower.includes('statebar')) return 'Atty Bar No';
+  if (lower.includes('attorneyfor') || lower.includes('attyfor') || lower.includes('attorney for')) return 'client_name';
   
   if (lower.includes('plaintiff') || lower.includes('petitioner') || lower.includes('pltf')) return 'plaintiff';
   if (lower.includes('defendant') || lower.includes('respondent') || lower.includes('deft')) return 'defendant';
@@ -729,7 +740,30 @@ exports.uploadTemplate = async (metaData, file) => {
     }
   });
 
-  // No automatic mapping pre-seeding needed for coordinate-based layout. Mappings are drawn visually by the admin.
+  try {
+    // Attempt Auto-Mapping based on field names
+    const acroForm = pdfDoc.catalog.get(pdfDoc.context.obj('AcroForm'));
+    if (acroForm) {
+      const fields = pdfDoc.getForm().getFields();
+      const mappingsToCreate = [];
+      for (const field of fields) {
+        const fieldName = field.getName();
+        const systemField = autoMapFieldName(fieldName);
+        if (systemField) {
+          mappingsToCreate.push({
+            template_id: template.id,
+            pdf_field_name: fieldName,
+            system_field_path: systemField
+          });
+        }
+      }
+      if (mappingsToCreate.length > 0) {
+        await prisma.courtFormMapping.createMany({ data: mappingsToCreate });
+      }
+    }
+  } catch (autoMapErr) {
+    console.warn('[PDF_UPLOAD] Auto-mapping skipped:', autoMapErr.message);
+  }
 
   return this.getTemplateById(template.id);
 };

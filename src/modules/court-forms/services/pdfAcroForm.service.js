@@ -111,7 +111,7 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
             valueToFill = dataPool['Atty Bar No'] || dataPool.bar_number;
           } 
           // Combined Attorney Box (for forms like SUBP-010 that don't have separate Name/Address fields)
-          else if (lowerName.includes('textfield1') || lowerName.includes('attynameandaddress') || (lowerName.includes('attypartyinfo') && (lowerName.includes('street') || lowerName.includes('addr') || lowerName.includes('box')))) {
+          else if (lowerName.includes('textfield1') || lowerName.includes('attynameandaddress') || lowerName.includes('attorneyandaddress')) {
             const parts = [];
             if (dataPool.attorney_name) {
               let nameBar = dataPool.attorney_name;
@@ -142,8 +142,20 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
           else if (lowerName.includes('attyfirm') || lowerName.includes('firm') || lowerName.includes('lawfirm')) {
             valueToFill = dataPool.firm_name;
           } 
+          // Firm / Attorney Zip Code
+          else if (lowerName.includes('zip')) {
+            valueToFill = dataPool.firm_zip;
+          }
+          // Firm / Attorney City
+          else if (lowerName.includes('city')) {
+            valueToFill = dataPool.firm_city || dataPool.court_city;
+          }
+          // Firm / Attorney State
+          else if (lowerName.includes('state')) {
+            valueToFill = dataPool.firm_state || dataPool.court_state;
+          }
           // Firm / Attorney Address - Street
-          else if (lowerName.includes('street') || lowerName.includes('address') || lowerName.includes('addr') || lowerName.includes('city') || lowerName.includes('zip') || lowerName.includes('state')) {
+          else if (lowerName.includes('street') || lowerName.includes('address') || lowerName.includes('addr')) {
             valueToFill = dataPool.firm_address || dataPool.court_address;
           } 
           // Phone / Telephone Number
@@ -222,7 +234,28 @@ async function fillFields(buffer, fieldValuesMap = {}, formData = {}) {
               field.enableMultiline();
             }
             
-            field.setText(sanitizedValue);
+            const maxLength = field.getMaxLength();
+            let finalValue = sanitizedValue;
+            if (maxLength !== undefined && finalValue.length > maxLength) {
+              finalValue = finalValue.substring(0, maxLength);
+              console.warn(`[PDF_ACROFORM] Truncated field "${fName}" from ${sanitizedValue.length} to ${maxLength} chars`);
+            }
+            
+            field.setText(finalValue);
+            
+            // Lock fixed attorney details so they cannot be edited in the PDF
+            if (sanitizedValue && (
+                sanitizedValue.includes('Victoria Tulsidas') || 
+                sanitizedValue.includes('365147') ||
+                sanitizedValue.includes('vtulsidas@victoriatulsidaslaw.com') ||
+                sanitizedValue.includes('750 San Vincente Blvd') ||
+                sanitizedValue === '90069' ||
+                sanitizedValue === '(310) 504-2359' ||
+                sanitizedValue === 'West Hollywood'
+            )) {
+                field.enableReadOnly();
+            }
+            
             filledCount++;
 //             console.log(`[PDF_ACROFORM_RUNTIME] Written Field "${fName}" = "${sanitizedValue}"`);
           } else if (type === 'PDFCheckBox') {
