@@ -51,6 +51,7 @@ const getAll = async (query, user) => {
     include: { field_definition: true }
   });
 
+  const originalFields = ['Settlement Goal', 'Settlement Goall', 'Statute of Limitations', 'Court Jurisdiction'];
   return matters.map(m => {
     m.custom_fields = customFields
       .filter(cf => cf.matter_id === m.id)
@@ -59,7 +60,8 @@ const getAll = async (query, user) => {
         name: cf.field_definition?.name || 'Unknown Field',
         type: cf.field_definition?.type || 'text',
         value: cf.value,
-      }));
+      }))
+      .filter(cf => originalFields.includes(cf.name));
     return m;
   });
 };
@@ -124,12 +126,15 @@ const getById = async (id, user) => {
     where: { matter_id: parseInt(id) },
     include: { field_definition: true }
   });
-  matter.custom_fields = customFields.map(cf => ({
-    field_id: cf.field_definition_id,
-    name: cf.field_definition?.name || 'Unknown Field',
-    type: cf.field_definition?.type || 'text',
-    value: cf.value,
-  }));
+  const originalFields = ['Settlement Goal', 'Settlement Goall', 'Statute of Limitations', 'Court Jurisdiction'];
+  matter.custom_fields = customFields
+    .map(cf => ({
+      field_id: cf.field_definition_id,
+      name: cf.field_definition?.name || 'Unknown Field',
+      type: cf.field_definition?.type || 'text',
+      value: cf.value,
+    }))
+    .filter(cf => originalFields.includes(cf.name));
 
   // Standardize invoices
   if (matter.invoices) {

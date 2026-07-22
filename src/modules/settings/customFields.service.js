@@ -5,10 +5,13 @@ exports.getAll = async (query = {}) => {
   if (query.active === 'true') {
     where.is_active = true;
   }
-  return await prisma.customFieldDefinition.findMany({
+  const fields = await prisma.customFieldDefinition.findMany({
     where,
     orderBy: { created_at: 'asc' }
   });
+
+  const originalFields = ['Settlement Goal', 'Settlement Goall', 'Statute of Limitations', 'Court Jurisdiction'];
+  return fields.filter(f => originalFields.includes(f.name));
 };
 
 exports.create = async (data) => {
