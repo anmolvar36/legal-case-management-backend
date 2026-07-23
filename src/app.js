@@ -8,9 +8,12 @@ const calendarRoutes = require('./modules/calendar/calendar.routes');
 const dashboardRoutes = require('./modules/dashboards/dashboards.routes');
 const { errorHandler } = require('./middlewares/error.middleware');
 
+const compression = require('compression');
+
 dotenv.config();
 
 const app = express();
+app.use(compression());
 
 // Middleware
 const clientUrls = (process.env.CLIENT_URL || '')

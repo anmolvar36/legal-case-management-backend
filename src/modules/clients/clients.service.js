@@ -62,7 +62,7 @@ const create = async (data, user) => {
     throw err;
   }
 
-  const { email, full_name, password, party_type, party_role, organization_name, contact_first_name, contact_last_name, business_address, home_address } = data;
+  const { email, full_name, password, party_type, party_role, organization_name, contact_first_name, contact_last_name, business_address, home_address, date_of_birth, government_id, insurance_number } = data;
 
   // 1. Check if user already exists
   let targetUser = await prisma.user.findUnique({ where: { email } });

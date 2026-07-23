@@ -181,6 +181,9 @@ model Client {
   contact_last_name String?
   business_address  String?
   home_address      String?
+  date_of_birth     DateTime?
+  government_id     String?
+  insurance_number  String?
   opposing_party_name   String?
   opposing_law_firm     String?
   opposing_counsel_name String?
@@ -194,6 +197,7 @@ model Client {
   trust_transactions TrustTransaction[]
   matter_parties    Matter[] @relation("matterparties")
 
+  @@index([created_at])
   @@map("clients")
 }
 
@@ -242,6 +246,10 @@ model Matter {
   tasks                Task[]
   generated_forms      GeneratedForm[]
 
+  @@index([client_id])
+  @@index([assigned_lawyer_id])
+  @@index([status])
+  @@index([created_at])
   @@map("matters")
 }
 

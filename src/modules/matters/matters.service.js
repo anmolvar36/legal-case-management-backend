@@ -162,22 +162,60 @@ const create = async (data, user) => {
     throw err;
   }
   if (user?.role === 'lawyer') {
-    if (data.assigned_lawyer_id && Number(data.assigned_lawyer_id) !== user.id) {
+    if (!data.assigned_lawyer_id || Number(data.assigned_lawyer_id) !== user.id) {
       const err = new Error('Lawyer can only create matters assigned to self');
       err.statusCode = 403;
       throw err;
     }
-    data.assigned_lawyer_id = user.id;
     data.created_by_user_id = user.id;
   }
 
-  const { custom_fields, clientIds, clientId, ...payload } = data;
+  const { custom_fields, clientIds, clientId, inlineParties, ...payload } = data;
 
   let idsToConnect = [];
   if (clientIds && Array.isArray(clientIds) && clientIds.length > 0) {
     idsToConnect = clientIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   } else if (clientId) {
     idsToConnect = [parseInt(clientId, 10)].filter(id => !isNaN(id));
+  }
+
+  // Handle inline parties — create new client records for each
+  if (inlineParties && Array.isArray(inlineParties) && inlineParties.length > 0) {
+    const bcrypt = require('bcryptjs');
+    for (const party of inlineParties) {
+      if (!party.full_name || !party.email) continue;
+      // Check if user already exists
+      let targetUser = await prisma.user.findUnique({ where: { email: party.email } });
+      if (!targetUser) {
+        const salt = await bcrypt.genSalt(10);
+        const password_hash = await bcrypt.hash('1234', salt);
+        targetUser = await prisma.user.create({
+          data: {
+            email: party.email,
+            full_name: party.full_name,
+            password_hash,
+            role: 'client',
+            must_reset_password: true,
+          }
+        });
+      }
+      const newClient = await prisma.client.create({
+        data: {
+          full_name: party.full_name,
+          email: party.email,
+          phone: party.phone || null,
+          home_address: party.home_address || null,
+          date_of_birth: party.date_of_birth ? new Date(party.date_of_birth) : null,
+          government_id: party.government_id || null,
+          insurance_number: party.insurance_number || null,
+          notes: party.notes || null,
+          party_type: party.party_type || 'Individual',
+          party_role: party.party_role || 'Client',
+          user_id: targetUser.id,
+        }
+      });
+      idsToConnect.push(newClient.id);
+    }
   }
 
   if (idsToConnect.length > 0) {
