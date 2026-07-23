@@ -790,7 +790,6 @@ exports.deleteTemplate = async (id) => {
 // ── MIGRATION / CLEANUP LOGIC ────────────────────────────────
 async function cleanupInvalidMappings() {
   try {
-    console.log('[COURT_FORMS_MIGRATION] Running automated cleanup of invalid/corrupt mappings...');
     const allMappings = await prisma.courtFormMapping.findMany();
     let deleteCount = 0;
     
