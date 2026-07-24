@@ -103,6 +103,7 @@ model User {
   assigned_tasks  Task[]       @relation("AssignedTasks")
   created_tasks   Task[]       @relation("CreatedTasks")
   event_attendances EventAttendee[]
+  expenses_created Expense[]   @relation("ExpenseCreatedBy")
   outlook_token String? @db.Text
   outlook_refresh_token String? @db.Text
   outlook_token_expires DateTime?
@@ -245,6 +246,7 @@ model Matter {
   trust_transactions   TrustTransaction[]
   tasks                Task[]
   generated_forms      GeneratedForm[]
+  expenses             Expense[]
 
   @@index([client_id])
   @@index([assigned_lawyer_id])
@@ -884,3 +886,25 @@ model GeneratedForm {
 
   @@map("generated_forms")
 }
+
+model Expense {
+  id              Int       @id @default(autoincrement())
+  vendor          String
+  matter_id       Int?
+  category        String    @default("General")
+  amount          Float
+  date            DateTime  @default(now())
+  status          String    @default("approved")
+  description     String?   @db.Text
+  created_by_id   Int?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  matter          Matter?   @relation(fields: [matter_id], references: [id], onDelete: SetNull)
+  created_by      User?     @relation("ExpenseCreatedBy", fields: [created_by_id], references: [id], onDelete: SetNull)
+
+  @@index([matter_id])
+  @@index([created_at])
+  @@map("expenses")
+}
+
