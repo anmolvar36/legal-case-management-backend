@@ -5,13 +5,10 @@ exports.getAll = async (query = {}) => {
   if (query.active === 'true') {
     where.is_active = true;
   }
-  const fields = await prisma.customFieldDefinition.findMany({
+  return await prisma.customFieldDefinition.findMany({
     where,
     orderBy: { created_at: 'asc' }
   });
-
-  const originalFields = ['Settlement Goal', 'Settlement Goall', 'Statute of Limitations', 'Court Jurisdiction'];
-  return fields.filter(f => originalFields.includes(f.name));
 };
 
 exports.create = async (data) => {
@@ -38,7 +35,11 @@ exports.update = async (id, data) => {
 };
 
 exports.remove = async (id) => {
+  const fieldId = parseInt(id, 10);
+  await prisma.matterCustomFieldValue.deleteMany({
+    where: { field_definition_id: fieldId }
+  });
   return await prisma.customFieldDefinition.delete({
-    where: { id: parseInt(id, 10) }
+    where: { id: fieldId }
   });
 };

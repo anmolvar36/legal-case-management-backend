@@ -720,7 +720,7 @@ model MatterCustomFieldValue {
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt
 
-  field_definition    CustomFieldDefinition @relation(fields: [field_definition_id], references: [id])
+  field_definition    CustomFieldDefinition @relation(fields: [field_definition_id], references: [id], onDelete: Cascade)
 
   @@unique([matter_id, field_definition_id])
   @@map("matter_custom_field_values")
